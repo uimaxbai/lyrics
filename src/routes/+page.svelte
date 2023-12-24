@@ -3,6 +3,7 @@
 
     $: subtitles = [];
     $: info = [];
+    let then = 0;
 
     async function searchSong(name: string) {
         var response = await fetch(`/api/searchSong?q=${name}`);
@@ -26,16 +27,17 @@
     }
 
     function playSubtitles() {
-        var then = (new Date()).getTime();
+        then = (new Date()).getTime();
         setInterval(() => {
-            var lyricsCont = document.querySelectorAll("#lyrics span");
+            var lyricsCont = document.querySelectorAll("#lyrics button");
             lyricsCont.forEach((el, i) => {
-                var diff = (new Date()).getTime() - then;
                 // console.log(diff);
-                
+                var diff = (new Date()).getTime() - then;
                 if (parseInt(el.getAttribute("data-timestamp")) > (diff - 10) && parseInt(el.getAttribute("data-timestamp")) < (diff + 10)) {
-                    document.querySelectorAll("#lyrics span")[i].style.fontWeight = "bold";
-                    if (i !== 0) document.querySelectorAll("#lyrics span")[i-1].style.fontWeight = "normal";
+                    (document.querySelectorAll(".active")).forEach((a, b) => {
+                        document.querySelectorAll(".active")[b].classList.remove("active");
+                    });
+                    document.querySelectorAll("#lyrics button")[i].classList.add("active");
                 }
             });
         }, 5);
@@ -73,7 +75,7 @@
 </script>
 
 <form id="artistForm">
-    <input required type="text" id="song" placeholder="Song" value="Silence (feat. Khalid)">
+    <input required type="text" id="song" placeholder="Song">
     <input type="submit" value="Search">
 </form>
 
@@ -102,7 +104,7 @@
 
 <p id="lyrics">
     {#each subtitles as sub, i}
-        <span data-timestamp={(sub.time.hundredths * 10) + (sub.time.minutes * 60 * 1000) + (sub.time.seconds * 1000)}>{sub.text}</span><br />
+        <button on:click={() => { then = (new Date()).getTime() - ((sub.time.hundredths * 10) + (sub.time.minutes * 60 * 1000) + (sub.time.seconds * 1000))}} data-timestamp={(sub.time.hundredths * 10) + (sub.time.minutes * 60 * 1000) + (sub.time.seconds * 1000)}>{sub.text}</button><br />
     {/each}
 </p>
 
@@ -117,5 +119,15 @@
         flex-direction: column;
         gap: 10px;
         padding-left: 0;
+    }
+    #lyrics button {
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        display: inline;
+        color: black;
+    }
+    .active {
+        font-weight: bold;
     }
 </style>
