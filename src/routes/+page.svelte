@@ -37,7 +37,7 @@
                     (document.querySelectorAll(".active")).forEach((a, b) => {
                         document.querySelectorAll(".active")[b].classList.remove("active");
                     });
-                    document.querySelectorAll("#lyrics button")[i].classList.add("active");
+                    el.classList.add("active");
                 }
             });
         }, 5);
@@ -87,7 +87,7 @@
 <ul id="searchResults">
     {#each info as thing, i}
         <li>
-            <button on:click={() => parseLyrics(thing.track.track_id)}>
+            <button class="searchButtons" on:click={() => parseLyrics(thing.track.track_id)}>
                 <img src={thing.track.album_coverart_100x100} alt="Cover image of {thing.track.track_name}" width="50" height="50">
                 <div>
                     <b>{thing.track.track_name}</b>
@@ -127,7 +127,20 @@
         display: inline;
         color: black;
     }
-    .active {
-        font-weight: bold;
+    :global(.active) {
+        font-weight: bold !important;
+    }
+    .searchButtons {
+        padding: .5rem;
+        border: 1px solid lightgray;
+        background: transparent;
+        border-radius: .25rem;
+        color: black;
+        img {
+            border-radius: 5px;
+        }
+        div {
+            text-align: center;
+        }
     }
 </style>
