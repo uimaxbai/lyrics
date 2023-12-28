@@ -172,6 +172,8 @@
             padding: .5rem;
             font-size: 1.1em;
             border: 0;
+            color: white;
+            background-color: #0873ff;
         }
         svg {
             height: 1.25em;
