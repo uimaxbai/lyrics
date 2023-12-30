@@ -1,21 +1,32 @@
 <script lang="ts">
     import { onMount } from 'svelte';
 
+    var apiPrefix = "/api/v1";
+    var token = "";
+
     $: subtitles = [];
     $: info = [];
     let then = 0;
 
     async function searchSong(name: string) {
-        var response = await fetch(`/api/searchSong?q=${name}`);
+        var response = await fetch(`${apiPrefix}/searchSong?q=${name}&token=${token}`);
         var data = await response.json();
+        return data;
+    }
+    async function getLyrics(id: number) {
+        var response = await fetch(`${apiPrefix}/getLyrics?id=${id}&token=${token}`);
+        var data = await response.json();
+        return data;
+    }
+    async function getToken() {
+        var response = await fetch(`${apiPrefix}/getToken`);
+        var data = await response.json();
+        if (!response.ok) {
+            return false;
+        }
         return data;
     }
 
-    async function getLyrics(id: number) {
-        var response = await fetch(`/api/getLyrics?id=${id}`);
-        var data = await response.json();
-        return data;
-    }
     function parseLyrics(id: number) {
         getLyrics(id).then((data) => {
             if (data.message.header.status_code !== 200) {
@@ -48,6 +59,17 @@
 
 
     onMount(() => {
+            if (localStorage.getItem("token") === null) {
+                getToken().then(data => {
+                    token = data.message.body.user_token;
+                    // document.getElementById("test")!.innerHTML = token.toString();
+                    if (data === false) document.getElementById("submit")!.setAttribute("disabled", "");
+                    localStorage.setItem("token", token);
+                });
+            } else {
+                token = localStorage.getItem("token")!;
+                // document.getElementById("test")!.innerHTML = token.toString();
+            }
         document.getElementById("artistForm")?.addEventListener("submit", (e) => {
             e.preventDefault();
             searchSong((<HTMLInputElement>document.getElementById("song"))?.value).then((data) => {
@@ -88,6 +110,8 @@
 </form>
 
 <br />
+
+<!-- <span id="test"></span> -->
 
 <span id="instrumental"></span>
 <span id="explicit"></span>

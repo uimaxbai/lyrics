@@ -2,15 +2,19 @@ import { error, json } from '@sveltejs/kit';
 
 /** @type {import('./$types').RequestHandler} */
 export async function GET({ url }) {
-	const name = url.searchParams.get('id') || "";
+    const name = url.searchParams.get('id') || "";
+    const token = url.searchParams.get('token') || "";
 
     if (name === "") {
         error(400, "Track ID was not specified in your request.");
     }
+    if (token === "") {
+        error(400, "No token was specified.");
+    }
 
     var linkToFetch = "https://apic-desktop.musixmatch.com/ws/1.1/track.subtitle.get?app_id=web-desktop-app-v1.0"
     + "&subtitle_format=mxm"
-    + "&usertoken=201219dbdb0f6aaba1c774bd931d0e79a28024e28db027ae72955c" // yes I am exposing (not my) token, have at it
+    + `&usertoken=${token}`
     + `&track_id=${encodeURIComponent(name)}`;
     // https://apic-desktop.musixmatch.com/ws/1.1/track.subtitle.get?app_id=web-desktop-app-v1.0&subtitle_format=lrc
 

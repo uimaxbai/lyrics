@@ -2,9 +2,11 @@ import { error, json } from '@sveltejs/kit';
 
 export async function GET({ url }) {
     const query = url.searchParams.get('q') || "";
+    const token = url.searchParams.get('token') || "";
+    if (token === "") error(400, "Please specify your user token.");
     if (query === "") error(400, "Specify a query to search for.")
     var linkToFetch = 'https://apic-desktop.musixmatch.com/ws/1.1/track.search?app_id=web-desktop-app-v1.0&page_size=5&page=1&s_track_rating=desc&quorum_factor=1.0'
-                      + "&usertoken=201219dbdb0f6aaba1c774bd931d0e79a28024e28db027ae72955c"
+                      + `&usertoken=${token}`
                       + `&q=${query}`;
     var response = await fetch(linkToFetch, {
         headers: {
