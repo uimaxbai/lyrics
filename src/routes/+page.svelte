@@ -1,8 +1,10 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import Switch from './Switch.svelte';
 
     var apiPrefix = "/api/v1";
     var token = "";
+    var autoScroll: boolean;
 
     $: subtitles = [];
     $: info = [];
@@ -39,7 +41,7 @@
 
     function playSubtitles() {
         then = (new Date()).getTime();
-        setInterval(() => {
+        var interv = setInterval(() => {
             var lyricsCont = document.querySelectorAll("#lyrics button");
             lyricsCont.forEach((el, i) => {
                 // console.log(diff);
@@ -49,6 +51,12 @@
                         document.querySelectorAll(".active")[b].classList.remove("active");
                     });
                     el.classList.add("active");
+                    if (i >= lyricsCont.length - 1) {
+                        clearInterval(interv);
+                    }
+                    if (autoScroll) {
+                        el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center"});
+                    }
                 }
             });
         }, 5);
@@ -101,10 +109,10 @@
     <meta name="description" content="Live lyrics for free, powered by Musixmatch! Sync to your songs and more...">
 </svelte:head>
 
-<form id="artistForm">
+<form id="artistForm" method="post">
     <div>
         <label for="song"><svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 512 512"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path opacity="1" d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z"/></svg></label>
-        <input type="search" spellcheck="false" name="song" required id="song" placeholder="Song, lyrics, artist...">
+        <input type="search" autocorrect="off" autocapitalize="off" name="song" required id="song" placeholder="Song, lyrics, artist..." spellcheck="false">
     </div>
     <input id="submit" type="submit" value="Search">
 </form>
@@ -116,6 +124,7 @@
 <span id="instrumental"></span>
 <span id="explicit"></span>
 
+<i>Not what you're looking for? Add the artist into your search</i><br>
 <ul id="searchResults">
     {#each info as thing, i}
         <li>
@@ -132,9 +141,15 @@
     {/each}
 </ul>
 
-<button id="playButton" on:click={playSubtitles}><svg xmlns="http://www.w3.org/2000/svg" height="16" width="12" viewBox="0 0 384 512"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path opacity="1" d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg>    Play lyrics</button>
+<div style="display: flex; align-items: center; justify-content: space-between;">
+    <button id="playButton" on:click={playSubtitles}><svg xmlns="http://www.w3.org/2000/svg" height="16" width="12" viewBox="0 0 384 512"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path opacity="1" d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg>    Play lyrics</button>
+    <Switch fontSize={24} bind:value={autoScroll} design="slider" label="Auto-scroll" />
+</div>
 
 <p id="lyrics">
+    <br>
+    <i>Press Play Lyrics before trying to click lyrics</i>
+    <i>Click on a lyric to skip to it</i><br>
     {#each subtitles as sub, i}
         <button on:click={() => { then = (new Date()).getTime() - ((sub.time.hundredths * 10) + (sub.time.minutes * 60 * 1000) + (sub.time.seconds * 1000))}} data-timestamp={(sub.time.hundredths * 10) + (sub.time.minutes * 60 * 1000) + (sub.time.seconds * 1000)}>{sub.text}</button><br />
     {/each}
@@ -162,7 +177,7 @@
         cursor: pointer;
         display: inline;
         color: black;
-        font-size: 1em;
+        font-size: 1.5em;
         text-align: left;
         margin-left: 0;
     }
@@ -225,7 +240,7 @@
         margin: 0 .5rem;
         overflow: hidden;
     }
-    #playButton {
+    #playButton, #scrollButton {
         padding: .5rem;
         margin-left: .5rem;
         // aspect-ratio: 1 / 1;
@@ -253,7 +268,7 @@
             background-color: #222;
             color: white;
         }
-        #playButton, .searchButtons, #lyrics button {
+        #playButton, .searchButtons, #lyrics button, #scrollButton {
             color: white;
         }
         svg {
@@ -264,5 +279,9 @@
             background: #222;
             color: white;
         }
+    }
+    i {
+        margin-left: .5rem;
+        display: block;
     }
 </style>
