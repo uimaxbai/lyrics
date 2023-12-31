@@ -130,7 +130,6 @@
 
 <br />
 
-<span id="test">{autoScroll}</span>
 
 <span id="instrumental"></span>
 <span id="explicit"></span>
