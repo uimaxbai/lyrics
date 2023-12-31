@@ -1,38 +1,46 @@
-# create-svelte
+# lyrics
 
-Everything you need to build a Svelte project, powered by [`create-svelte`](https://github.com/sveltejs/kit/tree/main/packages/create-svelte).
+Get lyrics from Musixmatch and display them on a website.
 
-## Creating a project
+*[Try it out](https://livelyrics.pages.dev)*
 
-If you're seeing this, you've probably already done this step. Congrats!
+## Run it locally
 
-```bash
-# create a new project in the current directory
-npm create svelte@latest
+1. Install packages `npm i`
+2. Run the dev server `npm run dev`
+3. Try it out!
 
-# create a new project in my-app
-npm create svelte@latest my-app
-```
+## API specification
 
-## Developing
+- GET `/api/v1/searchSong`
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+  Returns a JSON list of songs based on the search query. Factors in artists and lyrics as well as song names.
 
-```bash
-npm run dev
+  Query parameters:
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+  `q` Your search query
 
-## Building
+  `token` Your Musixmatch 
+  token which can be generated via `getToken`
 
-To create a production version of your app:
+- GET `/api/v1/getToken`
+  
+  Returns a token for use with the API in JSON format.
 
-```bash
-npm run build
-```
+- GET `/api/v1/getLyrics`
 
-You can preview the production build with `npm run preview`.
+  Returns a set of line-by-line lyrics in JSON format.
 
-> To deploy your app, you may need to install an [adapter](https://kit.svelte.dev/docs/adapters) for your target environment.
+  Query parameters:
+
+  `id` The track ID of the song, fetched via `searchSong`
+
+  `token` Your Musixmatch token which can be generated via `getToken`
+
+## Todo
+
+- [x] Auto-scroll lyrics
+- [ ] Soundcloud to play the songs
+- [ ] Less aggressive auto-scroll
+- [ ] Fix auto-scroll bugs
+- [ ] Add desktop support
