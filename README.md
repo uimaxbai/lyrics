@@ -41,6 +41,6 @@ Get lyrics from Musixmatch and display them on a website.
 
 - [x] Auto-scroll lyrics
 - [ ] Soundcloud to play the songs
-- [ ] Less aggressive auto-scroll
-- [ ] Fix auto-scroll bugs
+- [x] Less aggressive auto-scroll
+- [x] Fix auto-scroll bugs
 - [ ] Add desktop support

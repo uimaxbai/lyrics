@@ -4,7 +4,8 @@
 
     var apiPrefix = "/api/v1";
     var token = "";
-    var autoScroll: boolean;
+    let autoScroll: boolean;
+    let isScrolling = false;
 
     $: subtitles = [];
     $: info = [];
@@ -54,7 +55,7 @@
                     if (i >= lyricsCont.length - 1) {
                         clearInterval(interv);
                     }
-                    if (autoScroll) {
+                    if (autoScroll && !isScrolling) {
                         el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center"});
                     }
                 }
@@ -63,21 +64,31 @@
         
     }
 
-    
+    const checkForScroll = () => {
+        let scrollingTimeout: ReturnType<typeof setTimeout>;
+        window.addEventListener("scroll", () => {
+            clearTimeout(scrollingTimeout);
+            isScrolling = true;
+            scrollingTimeout = setTimeout(() => {
+                isScrolling = false;
+            }, 500);
+        })
+    }
 
 
     onMount(() => {
-            if (localStorage.getItem("token") === null) {
-                getToken().then(data => {
-                    token = data.message.body.user_token;
-                    // document.getElementById("test")!.innerHTML = token.toString();
-                    if (data === false) document.getElementById("submit")!.setAttribute("disabled", "");
-                    localStorage.setItem("token", token);
-                });
-            } else {
-                token = localStorage.getItem("token")!;
+        checkForScroll();
+        if (localStorage.getItem("token") === null) {
+            getToken().then(data => {
+                token = data.message.body.user_token;
                 // document.getElementById("test")!.innerHTML = token.toString();
-            }
+                if (data === false) document.getElementById("submit")!.setAttribute("disabled", "");
+                localStorage.setItem("token", token);
+            });
+        } else {
+            token = localStorage.getItem("token")!;
+            // document.getElementById("test")!.innerHTML = token.toString();
+        }
         document.getElementById("artistForm")?.addEventListener("submit", (e) => {
             e.preventDefault();
             searchSong((<HTMLInputElement>document.getElementById("song"))?.value).then((data) => {
@@ -119,7 +130,7 @@
 
 <br />
 
-<!-- <span id="test"></span> -->
+<span id="test">{autoScroll}</span>
 
 <span id="instrumental"></span>
 <span id="explicit"></span>
