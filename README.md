@@ -40,7 +40,7 @@ Get lyrics from Musixmatch and display them on a website.
 ## Todo
 
 - [x] Auto-scroll lyrics
-- [ ] Soundcloud to play the songs
+~~- [ ] Soundcloud to play the songs~~ *SoundCloud APIs are currently closed*
 - [x] Less aggressive auto-scroll
 - [x] Fix auto-scroll bugs
 - [ ] Add desktop support
