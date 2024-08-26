@@ -6,19 +6,42 @@
     var token = "";
     let autoScroll: boolean;
     let isScrolling = false;
+    var searchOffset = 0;
+    var spotifyToken = {token: "", expiry: 0};
+
+    interface Song {
+        name: string,
+        album: {
+            name: string,
+            images: {
+                url: string
+            }[]
+        },
+        artists: {
+            name: string
+        }[],
+        external_ids: {
+            isrc: string
+        }
+    }
 
     $: subtitles = [];
-    $: info = [];
+    let info: Song[] = [];
     let then = 0;
 
-    async function searchSong(name: string) {
-        var response = await fetch(`${apiPrefix}/searchSong?q=${name}&token=${token}`);
+    async function searchSong(name: string, offset: number, token: string) {
+        var response = await fetch(`${apiPrefix}/searchSong?q=${name}&o=${offset}&t=${token}`);
+        if (!response.ok) {
+            return false;
+        }
         var data = await response.json();
+        console.log(data);
         return data;
     }
-    async function getLyrics(id: number) {
+    async function getLyrics(id: string) {
         var response = await fetch(`${apiPrefix}/getLyrics?id=${id}&token=${token}`);
         var data = await response.json();
+        console.log(data);
         return data;
     }
     async function getToken() {
@@ -29,9 +52,19 @@
         }
         return data;
     }
+    async function getSpotifyToken() {
+        var response = await fetch(`${apiPrefix}/getSpotifyToken`);
+        var data = await response.json();
+        if (!response.ok) {
+            return false;
+        }
+        spotifyToken.token = await data.accessToken;
+        spotifyToken.expiry = await data.accessTokenExpirationTimestampMs;
+        return data;
+    }
 
-    function parseLyrics(id: number) {
-        getLyrics(id).then((data) => {
+    function parseLyrics(name: string) {
+        getLyrics(name).then((data) => {
             if (data.message.header.status_code !== 200) {
                 subtitles = [{ text: "ERROR" }];
             }
@@ -78,6 +111,7 @@
 
     onMount(() => {
         checkForScroll();
+        getSpotifyToken();
         if (localStorage.getItem("token") === null) {
             getToken().then(data => {
                 token = data.message.body.user_token;
@@ -89,28 +123,35 @@
             token = localStorage.getItem("token")!;
             // document.getElementById("test")!.innerHTML = token.toString();
         }
-        document.getElementById("artistForm")?.addEventListener("submit", (e) => {
-            e.preventDefault();
-            searchSong((<HTMLInputElement>document.getElementById("song"))?.value).then((data) => {
-                // console.log(data);
-                /* var info = data["message"]["body"]["macro_calls"]["track.lyrics.get"]["message"]["body"]["lyrics"];
-                var instrumental = false ? info.instrumental === 0 : true;
-                var explicit = false ? info.explicit === 0 : true;
+        document.getElementById("song")?.addEventListener("keyup", (e) => {
+            //e.preventDefault();
+            if ((new Date()).getTime() >= spotifyToken.expiry || spotifyToken.token === "") {
+                getSpotifyToken();
+            }
+            if ((<HTMLInputElement>document.getElementById("song"))?.value !== "") {
+                searchSong((<HTMLInputElement>document.getElementById("song"))?.value, searchOffset, spotifyToken.token).then((data) => {
+                    if (data === false) {
+                        info = [{ name: "ERROR", album: { name: "", images: [{ url: "" }] }, artists: [{ name: "" }], external_ids: { isrc: "" } }];
+                        return;
+                    }
+                    // console.log(data);
+                    /* var info = data["message"]["body"]["macro_calls"]["track.lyrics.get"]["message"]["body"]["lyrics"];
+                    var instrumental = false ? info.instrumental === 0 : true;
+                    var explicit = false ? info.explicit === 0 : true;
 
-                var instrumentalHTML = document.getElementById("instrumental");
-                var explicitHTML = document.getElementById("explicit");
+                    var instrumentalHTML = document.getElementById("instrumental");
+                    var explicitHTML = document.getElementById("explicit");
 
-                instrumentalHTML!.innerHTML = `<b>Instrumental</b>: ${instrumental.toString()}<br />`;
-                explicitHTML!.innerHTML = `<b>Explicit</b>: ${explicit.toString()}`;
+                    instrumentalHTML!.innerHTML = `<b>Instrumental</b>: ${instrumental.toString()}<br />`;
+                    explicitHTML!.innerHTML = `<b>Explicit</b>: ${explicit.toString()}`;
 
-                var lyrics = (info.lyrics_body).replace(/(?:\r\n|\r|\n)/g, '<br>');
-                document.getElementById("lyrics")!.innerHTML = lyrics; */
-                if (data.message.header.status_code !== 200) {
-                    info = [{ track_name: "ERROR" }];
-                }
-                info = data.message.body.track_list;
+                    var lyrics = (info.lyrics_body).replace(/(?:\r\n|\r|\n)/g, '<br>');
+                    document.getElementById("lyrics")!.innerHTML = lyrics; */
+                    
+                    info = data.tracks.items;
 
-            });
+                });
+            }
         });
     });
 </script>
@@ -120,12 +161,11 @@
     <meta name="description" content="Live lyrics for free, powered by Musixmatch! Sync to your songs and more...">
 </svelte:head>
 
-<form id="artistForm" method="post">
+<form id="artistForm" method="post" on:submit|preventDefault>
     <div>
         <label for="song"><svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 512 512"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path opacity="1" d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z"/></svg></label>
-        <input type="search" autocorrect="off" autocapitalize="off" name="song" required id="song" placeholder="Song, lyrics, artist..." spellcheck="false">
+        <input type="text" autocorrect="off" autocapitalize="off" name="song" required id="song" placeholder="Song, lyrics, artist..." spellcheck="false">
     </div>
-    <input id="submit" type="submit" value="Search">
 </form>
 
 <br />
@@ -136,14 +176,22 @@
 
 <i>Not what you're looking for? Add the artist into your search</i><br>
 <ul id="searchResults">
-    {#each info as thing, i}
+    {#each info as thing}
         <li>
-            <button class="searchButtons" on:click={() => parseLyrics(thing.track.track_id)}>
-                <img src={thing.track.album_coverart_100x100} alt="Cover image of {thing.track.track_name}" width="50" height="50">
+            <button class="searchButtons" on:click={() => parseLyrics(thing.external_ids.isrc)}>
+                <img src={thing.album.images[0].url} alt="Cover image of {thing.name}" width="50" height="50">
                 <div>
-                    <b>{thing.track.track_name}</b>
+                    <b>{thing.name}</b>
                     <br />
-                    <span>{thing.track.artist_name}</span>
+                    <span>
+                        {#each thing.artists as artist, i}
+                            {#if i === thing.artists.length - 1}
+                                {artist.name}
+                            {:else}
+                                {artist.name},&nbsp
+                            {/if}
+                        {/each}
+                    </span>
                 </div>
             </button>
             

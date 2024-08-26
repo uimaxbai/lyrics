@@ -12,15 +12,16 @@ export async function GET({ url }) {
         error(400, "No token was specified.");
     }
 
-    var linkToFetch = "https://apic-desktop.musixmatch.com/ws/1.1/track.subtitle.get?app_id=web-desktop-app-v1.0"
-    + "&subtitle_format=mxm"
-    + `&usertoken=${token}`
-    + `&track_id=${encodeURIComponent(name)}`;
+    var linkToFetch = "https://api.musixmatch.com/ws/1.1/matcher.subtitle.get"
+    + `?f_subtitle_length_max_deviation=1&subtitle_format=lrc`
+    + `&apikey=90024f49a51caa186f9ce49a6c7af577`
+    + `&track_isrc=${encodeURIComponent(name)}`;
+    console.log(linkToFetch);
     // https://apic-desktop.musixmatch.com/ws/1.1/track.subtitle.get?app_id=web-desktop-app-v1.0&subtitle_format=lrc
 
     var response = await fetch(linkToFetch, {
         headers: {
-            "Cookie": 'AWSELB=55578B011601B1EF8BC274C33F9043CA947F99DCFF0A80541772015CA2B39C35C0F9E1C932D31725A7310BCAEB0C37431E024E2B45320B7F2C84490C2C97351FDE34690157',
+            "Cookie": 'AWSELB=55578B011601B1EF8BC274C33F9043CA947F99DCFF0A80541772015CA2B39C35C0F9E1C932D31725A7310BCAEB0C37431E024E2B45320B7F2C84490C2C97351FDE34690157,AWSELBCORS=0',
             "Origin": 'musixmatch.com',
         }
     });
