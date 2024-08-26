@@ -1,5 +1,10 @@
 # lyrics
 
+### Changes that I make in this version
+
+- Use Spotify search instead of Musixmatch
+- Try to fix broken lyrics (see main branch)
+
 Get lyrics from Musixmatch and display them on a website.
 
 *[Try it out](https://livelyrics.pages.dev)*
