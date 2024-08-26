@@ -1,8 +1,10 @@
 # lyrics
 
+### This project can be counted as deprecated! Musixmatch recently updated their lyrics API and have patched their lyrics, making this project now infeasible.
+
 Get lyrics from Musixmatch and display them on a website.
 
-*[Try it out](https://livelyrics.pages.dev)*
+*[Try it out](https://lyrics.okit.works)*
 
 ## Run it locally
 
