@@ -5,7 +5,7 @@ export async function GET({ url }) {
     const token = url.searchParams.get('token') || "";
     if (token === "") error(400, "Please specify your user token.");
     if (query === "") error(400, "Specify a query to search for.")
-    var linkToFetch = 'https://apic-desktop.musixmatch.com/ws/1.1/track.search?app_id=web-desktop-app-v1.0&page_size=5&page=1&s_track_rating=desc'
+    var linkToFetch = 'https://apic-desktop.musixmatch.com/ws/1.1/track.search?app_id=web-desktop-app-v1.0&page_size=5&page=1&f_has_lyrics=true'
                       + `&usertoken=${token}`
                       + `&q=${query}`;
     var response = await fetch(linkToFetch, {

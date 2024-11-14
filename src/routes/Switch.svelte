@@ -116,6 +116,7 @@
         margin: 0 0 0 0.5em;
         background: var(--gray);
         border: none;
+        cursor: pointer;
     }
 
     .s--slider button::before {

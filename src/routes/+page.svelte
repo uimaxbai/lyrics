@@ -4,6 +4,7 @@
 
     var apiPrefix = "/api/v1";
     var token = "";
+    var tokenInterval = null;
     let autoScroll: boolean;
     let isScrolling = false;
 
@@ -56,7 +57,7 @@
                         clearInterval(interv);
                     }
                     if (autoScroll && !isScrolling) {
-                        el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center"});
+                        el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest"});
                     }
                 }
             });
@@ -75,20 +76,36 @@
         })
     }
 
+    const parseToken = () => {
+        getToken().then(data => {
+            try {
+                token = data.message.body.user_token;
+                (document.getElementById("submit") as HTMLInputElement)!.disabled = false;
+                document.getElementById("error-musixmatch")!.style.display = "none";
+                localStorage.setItem("token", token);
+            } catch (_) {
+                // user token not in message
+                if (localStorage.getItem("token") == null) {
+                    console.error("Musixmatch token can not be accessed (blocked by a captcha?) and no localStorage alternative");
+                    document.getElementById("error-musixmatch")!.style.display = "block";
+                    setTimeout(parseToken, 1000); 
+                }
+                else {
+                    token = localStorage.getItem("token") || "";
+                    console.warn("Musixmatch token is blocked, but a localStorage alternative is avaliable.")
+                    document.getElementById("error-musixmatch")!.style.display = "none";
+                    (document.getElementById("submit") as HTMLInputElement)!.disabled = false;
+                    setTimeout(parseToken, 5000); 
+                }
+            }
+        });
+    }
+
 
     onMount(() => {
         checkForScroll();
-        if (localStorage.getItem("token") === null) {
-            getToken().then(data => {
-                token = data.message.body.user_token;
-                // document.getElementById("test")!.innerHTML = token.toString();
-                if (data === false) document.getElementById("submit")!.setAttribute("disabled", "");
-                localStorage.setItem("token", token);
-            });
-        } else {
-            token = localStorage.getItem("token")!;
-            // document.getElementById("test")!.innerHTML = token.toString();
-        }
+        (document.getElementById("submit") as HTMLInputElement)!.disabled = true;
+        parseToken(); // parse for musixmatch token
         document.getElementById("artistForm")?.addEventListener("submit", (e) => {
             e.preventDefault();
             searchSong((<HTMLInputElement>document.getElementById("song"))?.value).then((data) => {
@@ -123,7 +140,7 @@
 <form id="artistForm" method="post">
     <div>
         <label for="song"><svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 512 512"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path opacity="1" d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z"/></svg></label>
-        <input type="search" autocorrect="off" autocapitalize="off" name="song" required id="song" placeholder="Song, lyrics, artist..." spellcheck="false">
+        <input type="text" autocorrect="off" autocapitalize="off" name="song" required id="song" placeholder="Song, lyrics, artist..." spellcheck="false">
     </div>
     <input id="submit" type="submit" value="Search">
 </form>
@@ -135,6 +152,7 @@
 <span id="explicit"></span>
 
 <i>Not what you're looking for? Add the artist into your search</i><br>
+<p id="error-musixmatch" style="color: #f00; display: none;">Sorry, Musixmatch is currently blocking your requests. Please wait up to 5 minutes - the issue will resolve itself.</p>
 <ul id="searchResults">
     {#each info as thing, i}
         <li>
@@ -169,6 +187,9 @@
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
     * {
         font-family: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif!important;
+    }
+    button {
+        cursor: pointer;
     }
     #searchResults {
         li, li button {
@@ -223,27 +244,37 @@
             border: 0;
             color: white;
             background-color: #0873ff;
+            cursor: pointer;
+            &:hover {
+                filter: brightness(0.9);
+            }
+            &:disabled {
+                filter: brightness(1)!important;
+                background-color: #afafaf;
+                cursor: not-allowed;
+            }
         }
         svg {
             height: 1.25em;
             margin-left: 1rem;
             width: 1.25em;
         }
-    }
-    #song {
-        margin: 0;
-        max-width: 100%;
-        overflow: hidden;
-        border-radius: 0;
-        position: fixed; //  backup
-        position: sticky;
-        top: 0;
-        left: 0;
-        border: 0;
-        // border-bottom: 1px solid lightgray;
-        font-size: 2em;
-        outline: 0;
-        background: white;
+        #song {
+            margin: 0;
+            max-width: 100%;
+            overflow: hidden;
+            border-radius: 0;
+            position: fixed; //  backup
+            position: sticky;
+            top: 0;
+            left: 0;
+            border: 0;
+            // border-bottom: 1px solid lightgray;
+            font-size: 2em;
+            outline: 0;
+            background: white;
+            margin-left: 5px;
+        }
     }
     #searchResults {
         width: 100%;
