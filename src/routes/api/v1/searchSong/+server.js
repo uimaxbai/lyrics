@@ -3,10 +3,11 @@ import { error, json } from '@sveltejs/kit';
 export async function GET({ url }) {
     const query = url.searchParams.get('q') || "";
     const token = url.searchParams.get('token') || "";
+    const page = parseInt(url.searchParams.get('page')) || 1;
     if (token === "") error(400, "Please specify your user token.");
     if (query === "") error(400, "Specify a query to search for.")
-    var linkToFetch = 'https://apic-desktop.musixmatch.com/ws/1.1/track.search?app_id=web-desktop-app-v1.0&page_size=5&page=1&f_has_lyrics=true'
-                      + `&usertoken=${token}`
+    var linkToFetch = 'https://apic-desktop.musixmatch.com/ws/1.1/track.search?app_id=web-desktop-app-v1.0&page_size=5&f_has_lyrics=true'
+                      + `&usertoken=${token}&page=${page}`
                       + `&q=${query}`;
     var response = await fetch(linkToFetch, {
         headers: {

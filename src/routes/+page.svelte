@@ -7,13 +7,15 @@
     var tokenInterval = null;
     let autoScroll: boolean;
     let isScrolling = false;
+    let songValue = "";
+    let currentPage = 1;
 
     $: subtitles = [];
     $: info = [];
     let then = 0;
 
-    async function searchSong(name: string) {
-        var response = await fetch(`${apiPrefix}/searchSong?q=${name}&token=${token}`);
+    async function searchSong(name: string, page: number = 1) {
+        var response = await fetch(`${apiPrefix}/searchSong?q=${name}&token=${token}&page=${page}`);
         var data = await response.json();
         return data;
     }
@@ -108,6 +110,7 @@
         parseToken(); // parse for musixmatch token
         document.getElementById("artistForm")?.addEventListener("submit", (e) => {
             e.preventDefault();
+            currentPage = 1;
             searchSong((<HTMLInputElement>document.getElementById("song"))?.value).then((data) => {
                 // console.log(data);
                 /* var info = data["message"]["body"]["macro_calls"]["track.lyrics.get"]["message"]["body"]["lyrics"];
@@ -140,7 +143,7 @@
 <form id="artistForm" method="post">
     <div>
         <label for="song"><svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 512 512"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path opacity="1" d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z"/></svg></label>
-        <input type="text" autocorrect="off" autocapitalize="off" name="song" required id="song" placeholder="Song, lyrics, artist..." spellcheck="false">
+        <input type="text" bind:value={songValue} autocorrect="off" autocapitalize="off" name="song" required id="song" placeholder="Song, lyrics, artist..." spellcheck="false">
     </div>
     <input id="submit" type="submit" value="Search">
 </form>
@@ -167,6 +170,12 @@
             
         </li>
     {/each}
+    <li class="pagination">
+        <!-- wonderful code here, not a pain to see -->
+        <button class="searchButtons" on:click={() => { if (currentPage > 1 && info.length > 0) { searchSong(songValue, currentPage - 1).then((data) => { info = (data.message.header.status_code !== 200) ? [{ track_name: "ERROR" }] : data.message.body.track_list; }); currentPage -= 1; } }}><svg height="16" width="12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.--><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></button>
+        <span>{currentPage}</span>
+        <button class="searchButtons" on:click={() => { if (info.length > 0) { searchSong(songValue, currentPage + 1).then((data) => { info = (data.message.header.status_code !== 200) ? [{ track_name: "ERROR" }] : data.message.body.track_list; });; currentPage += 1; }}}><svg height="16" width="12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.--><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></button>
+    </li>
 </ul>
 
 <div style="display: flex; align-items: center; justify-content: space-between;">
