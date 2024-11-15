@@ -327,7 +327,7 @@
             filter: invert(100%);
         }
         #song {
-            background: #222;
+            background: #222!important;
             color: white;
         }
     }
