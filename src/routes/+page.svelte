@@ -434,6 +434,7 @@
 </div>
 
 <div id="lyrics">
+    <p>To sync to a line, click on it (after playing lyrics). Press 'Play lyrics' to begin the logic</p>
     {#if subtitles.length > 0}
         {#if lyricsType === 'richsync'}
             {#each subtitles as line, i}
