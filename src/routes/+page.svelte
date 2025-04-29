@@ -37,7 +37,12 @@
         return data;
     }
     async function getToken() {
-        var response = await fetch(`${apiPrefix}/getToken`);
+        var response = await fetch('https://apic-desktop.musixmatch.com/ws/1.1/token.get?app_id=web-desktop-app-v1.0', {
+        headers: {
+            "Cookie": 'AWSELB=55578B011601B1EF8BC274C33F9043CA947F99DCFF0A80541772015CA2B39C35C0F9E1C932D31725A7310BCAEB0C37431E024E2B45320B7F2C84490C2C97351FDE34690157',
+            "Origin": 'musixmatch.com',
+        }
+    });
         var data = await response.json();
         if (!response.ok) {
             return false;
