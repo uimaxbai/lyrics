@@ -4,7 +4,7 @@
 
 Get lyrics from Musixmatch and display them on a website.
 
-*[Try it out](https://lyrics.okit.works)*
+*[Try it out](https://lyrics.binimum.org)*
 
 ## Run it locally
 
