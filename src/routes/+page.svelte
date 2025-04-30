@@ -2,7 +2,8 @@
     import { onMount } from 'svelte';
     import Switch from './Switch.svelte';
 
-    var apiPrefix = "/api/v1";
+    // Change apiPrefix to an array of potential prefixes
+    var apiPrefixes = ["/api/v1"]; // Example prefixes
     var token = "";
     let autoScroll: boolean;
     let isScrolling = false;
@@ -10,43 +11,70 @@
     let currentPage = 1;
 
     let subtitles: any[] = [];
-    let lyricsType: 'subtitle' | 'richsync' | null = null; // To store the type of lyrics received
+    let lyricsType: 'subtitle' | 'richsync' | null = null;
     type TrackInfo = {
         track: {
             track_id: number;
             track_name: string;
             artist_name: string;
             album_coverart_100x100: string;
-            // Add other relevant properties if needed
         };
     };
-    let info: TrackInfo[] = []; // Use the specific type here
+    let info: TrackInfo[] = [];
     let then = 0;
     let currentLyricIndex = -1; // Track the currently active lyric index
     let currentWordIndex = -1; // Track the currently active word index within a line
     let playbackIntervalId: ReturnType<typeof setInterval> | null = null; // Declare interval ID variable
 
-    async function searchSong(name: string, page: number = 1) {
-        var response = await fetch(`${apiPrefix}/searchSong?q=${name}&token=${token}&page=${page}`);
-        var data = await response.json();
-        return data;
-    }
-    async function getLyrics(id: number) {
-        var response = await fetch(`${apiPrefix}/getLyrics?id=${id}&token=${token}`);
-        var data = await response.json();
-        return data;
-    }
-    async function getToken() {
-        var response = await fetch(`${apiPrefix}/getToken`);
-        var data = await response.json();
-        // alert(data)
-        if (!response.ok) {
-            return false;
+    // Helper function to fetch with retry logic for different prefixes
+    async function fetchWithRetry(url: string) {
+        for (const prefix of apiPrefixes) {
+            try {
+                const fullUrl = `${prefix}${url}`;
+                console.log(`Trying API prefix: ${prefix} for URL: ${url}`); // Optional: for debugging
+                const response = await fetch(fullUrl);
+                if (!response.ok) {
+                    // Handle non-401 errors immediately if needed
+                    console.error(`Fetch error for ${fullUrl}: ${response.status} ${response.statusText}`);
+                    continue; // Or throw an error depending on desired behavior
+                }
+                const data = await response.json();
+                // Check the specific condition for success (status code not 401)
+                if (data?.message?.header?.status_code !== 401) {
+                    console.log(`Success with prefix: ${prefix}`); // Optional: for debugging
+                    return data; // Return the successful response data
+                } else {
+                    console.error(`Fetch error for ${fullUrl}: ${response.status} ${response.statusText}`);
+                    continue; // Or throw an error depending on desired behavior
+                }
+                console.log(`Prefix ${prefix} returned 401 or invalid data structure.`); // Optional: for debugging
+            } catch (error) {
+                console.error(`Error fetching from prefix ${prefix}:`, error);
+                // Continue to the next prefix even if fetch itself fails (e.g., network error)
+            }
         }
-        return data;
+        // If the loop completes without returning, all prefixes failed
+        console.error("All API prefixes failed or returned 401.");
+        throw new Error("Failed to fetch data from API after trying all prefixes.");
     }
 
+    async function searchSong(name: string, page: number = 1) {
+        // Use the fetchWithRetry helper
+        return await fetchWithRetry(`/searchSong?q=${name}&token=${token}&page=${page}`);
+    }
+
+    async function getLyrics(id: number) {
+        // Use the fetchWithRetry helper
+        return await fetchWithRetry(`/getLyrics?id=${id}&token=${token}`);
+    }
+
+    async function getToken() {
+        return await fetchWithRetry(`/getToken`);
+    }
+
+
     function parseLyrics(id: number) {
+        // getLyrics now uses fetchWithRetry
         getLyrics(id).then((data) => {
             if (!data || data.message.header.status_code !== 200) {
                 subtitles = [{ text: "ERROR fetching lyrics" }];
@@ -134,6 +162,11 @@
                     }
                 }
             }, 500);
+        }).catch(error => {
+            // Handle errors from fetchWithRetry (e.g., all prefixes failed)
+            console.error("Error in parseLyrics:", error);
+            subtitles = [{ text: "ERROR fetching lyrics after retries" }];
+            lyricsType = null;
         });
     }
 
@@ -353,6 +386,19 @@
                     setTimeout(parseToken, 5000); 
                 }
             }
+        }).catch(_ => {
+            if (localStorage.getItem("token") == null) {
+                console.error("Musixmatch token can not be accessed (blocked by a captcha?) and no localStorage alternative");
+                document.getElementById("error-musixmatch")!.style.display = "block";
+                setTimeout(parseToken, 1000); 
+            }
+            else {
+                token = localStorage.getItem("token") || "";
+                console.warn("Musixmatch token is blocked, but a localStorage alternative is avaliable.")
+                document.getElementById("error-musixmatch")!.style.display = "none";
+                (document.getElementById("submit") as HTMLInputElement)!.disabled = false;
+                setTimeout(parseToken, 5000); 
+            }
         });
     }
 
@@ -363,17 +409,17 @@
         document.getElementById("artistForm")?.addEventListener("submit", (e) => {
             e.preventDefault();
             currentPage = 1;
+            // searchSong now uses fetchWithRetry
             searchSong((<HTMLInputElement>document.getElementById("song"))?.value).then((data) => {
-                /*
-                instrumentalHTML!.innerHTML = `<b>Instrumental</b>: ${instrumental.toString()}<br />`;
-                explicitHTML!.innerHTML = `<b>Explicit</b>: ${explicit.toString()}`;
-                */
-                if (data.message.header.status_code !== 200) {
+                 if (!data || data.message.header.status_code !== 200) {
                     // Provide an empty track object matching the type structure for errors
                     info = [{ track: { track_id: 0, track_name: "ERROR", artist_name: "", album_coverart_100x100: "" } }];
-                }
-                info = data.message.body.track_list;
-
+                 } else {
+                     info = data.message.body.track_list;
+                 }
+            }).catch(error => {
+                 console.error("Error in form submission search:", error);
+                 info = [{ track: { track_id: 0, track_name: "ERROR searching", artist_name: "", album_coverart_100x100: "" } }];
             });
         });
     });
