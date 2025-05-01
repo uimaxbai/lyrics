@@ -21,6 +21,8 @@
         };
     };
     let info: TrackInfo[] = [];
+    let searchPerformed = false; // Flag to track if a search has been done
+    let searchError = false; // Flag to track if the search resulted in an error
     let then = 0;
     let currentLyricIndex = -1; // Track the currently active lyric index
     let currentWordIndex = -1; // Track the currently active word index within a line
@@ -34,10 +36,57 @@
     async function fetchWithRetry(basePathWithQuery: string) { // e.g., /searchSong?q=...
         const hardcodedToken = "201219dbdb0f6aaba1c774bd931d0e79a28024e28db027ae72955c"; // The fallback token
 
-        // --- Initial attempts with fetched tokens ---
+        // --- Attempt with one randomly chosen endpoint first ---
+        if (apiPrefixes.length > 0) {
+            const randomIndex = Math.floor(Math.random() * apiPrefixes.length);
+            const randomPrefix = apiPrefixes[randomIndex];
+            console.log(`Attempting initial fetch with randomly chosen prefix: ${randomPrefix}`);
+            try {
+                // 1. Fetch token for the random prefix
+                console.log(`Fetching token using random prefix: ${randomPrefix}`);
+                const tokenResponse = await fetch(`${randomPrefix}/getToken`);
+                if (!tokenResponse.ok) {
+                    throw new Error(`Token fetch failed for random ${randomPrefix}: ${tokenResponse.status} ${tokenResponse.statusText}`);
+                }
+                const tokenData = await tokenResponse.json();
+                if (tokenData?.message?.header?.status_code !== 200 || !tokenData?.message?.body?.user_token) {
+                    throw new Error(`Invalid token data or error status code from random ${randomPrefix}: ${tokenData?.message?.header?.status_code}`);
+                }
+                const currentToken = tokenData.message.body.user_token;
+                console.log(`Successfully obtained token for random prefix ${randomPrefix}`);
+
+                // 2. Construct URL for the actual request using the new token
+                const urlObject = new URL(randomPrefix + basePathWithQuery, window.location.origin);
+                urlObject.searchParams.set('token', currentToken);
+                const fullUrl = urlObject.toString();
+
+                // 3. Fetch the actual data using the obtained token
+                console.log(`Fetching data from (random attempt): ${fullUrl}`);
+                const response = await fetch(fullUrl);
+                if (!response.ok) {
+                    throw new Error(`Data fetch failed for random ${fullUrl}: ${response.status} ${response.statusText}`);
+                }
+                const data = await response.json();
+
+                // 4. Check the body status code for the data response
+                if (data?.message?.header?.status_code === 200) {
+                    console.log(`Success with randomly chosen prefix: ${randomPrefix} (using fetched token)`);
+                    return data; // Success! Return data.
+                }
+                // If status code is not 200, treat it as a failure for this random attempt
+                throw new Error(`API returned error in body for random ${fullUrl}: Status code ${data?.message?.header?.status_code}`);
+
+            } catch (error) {
+                console.error(`Initial random attempt with prefix ${randomPrefix} failed:`, error);
+                // Fall through to sequential attempts if the random one fails
+            }
+        }
+
+        // --- Sequential attempts with fetched tokens (if random failed) ---
+        console.log("Random attempt failed or no prefixes. Starting sequential fallback with fetched tokens.");
         for (const prefix of apiPrefixes) {
             try {
-                // 1. Fetch token for this prefix
+                // ... (rest of the token fetching and data fetching logic as before)
                 console.log(`Attempting to fetch token using prefix: ${prefix}`);
                 const tokenResponse = await fetch(`${prefix}/getToken`);
                 if (!tokenResponse.ok) {
@@ -50,12 +99,10 @@
                 const currentToken = tokenData.message.body.user_token;
                 console.log(`Successfully obtained token for prefix ${prefix}`);
 
-                // 2. Construct URL for the actual request using the new token
-                const urlObject = new URL(prefix + basePathWithQuery, window.location.origin); // Use origin for base URL resolution
-                urlObject.searchParams.set('token', currentToken); // Add the fetched token
+                const urlObject = new URL(prefix + basePathWithQuery, window.location.origin);
+                urlObject.searchParams.set('token', currentToken);
                 const fullUrl = urlObject.toString();
 
-                // 3. Fetch the actual data using the obtained token
                 console.log(`Fetching data from: ${fullUrl}`);
                 const response = await fetch(fullUrl);
                 if (!response.ok) {
@@ -63,10 +110,9 @@
                 }
                 const data = await response.json();
 
-                // 4. Check the body status code for the data response
                 if (data?.message?.header?.status_code === 200) {
                     console.log(`Success with prefix: ${prefix} (using fetched token)`);
-                    return data; // Success! Return data.
+                    return data;
                 } else {
                     throw new Error(`API returned error in body for ${fullUrl}: Status code ${data?.message?.header?.status_code}`);
                 }
@@ -76,13 +122,13 @@
             }
         }
 
-        // --- Fallback attempts with hardcoded token across all prefixes ---
-        console.log("All API prefixes failed with fetched tokens. Attempting fallback with hardcoded token across all prefixes.");
+        // --- Fallback attempts with hardcoded token across all prefixes (if sequential fetched tokens failed) ---
+        console.log("Sequential attempts with fetched tokens failed. Attempting fallback with hardcoded token across all prefixes.");
         for (const fallbackPrefix of apiPrefixes) {
             try {
-                // Construct URL with hardcoded token
+                // ... (rest of the hardcoded token logic as before)
                 const fallbackUrlObject = new URL(fallbackPrefix + basePathWithQuery, window.location.origin);
-                fallbackUrlObject.searchParams.set('token', hardcodedToken); // Use hardcoded token
+                fallbackUrlObject.searchParams.set('token', hardcodedToken);
                 const fallbackFullUrl = fallbackUrlObject.toString();
 
                 console.log(`Fetching data using fallback token from: ${fallbackFullUrl}`);
@@ -94,7 +140,7 @@
 
                 if (data?.message?.header?.status_code === 200) {
                     console.log(`Success with fallback token using prefix: ${fallbackPrefix}`);
-                    return data; // Success with fallback!
+                    return data;
                 } else {
                     throw new Error(`API returned error in body for fallback request ${fallbackFullUrl}: Status code ${data?.message?.header?.status_code}`);
                 }
@@ -104,9 +150,9 @@
             }
         }
 
-        // If the initial loop and the fallback loop complete without returning, all attempts failed
-        console.error("All API prefixes failed with both fetched and hardcoded tokens.");
-        throw new Error("Failed to fetch data from API after trying all prefixes with fetched and fallback tokens.");
+        // If all attempts failed
+        console.error("All API prefixes failed with random, fetched, and hardcoded tokens.");
+        throw new Error("Failed to fetch data from API after trying random, sequential fetched, and fallback tokens.");
     }
 
     async function searchSong(name: string, page: number = 1) {
@@ -481,17 +527,25 @@
         document.getElementById("artistForm")?.addEventListener("submit", (e) => {
             e.preventDefault();
             currentPage = 1;
+            searchPerformed = false; // Reset flags before search
+            searchError = false;
+            info = []; // Clear previous results
             // searchSong now uses fetchWithRetry
             searchSong((<HTMLInputElement>document.getElementById("song"))?.value).then((data) => {
+                 searchPerformed = true; // Mark search as completed
                  if (!data || data.message.header.status_code !== 200) {
+                    searchError = true;
                     // Provide an empty track object matching the type structure for errors
-                    info = [{ track: { track_id: 0, track_name: "ERROR", artist_name: "", album_coverart_100x100: "" } }];
+                    info = []; // Keep info empty on error
+                    console.error("Search failed or returned non-200 status code.");
                  } else {
-                     info = data.message.body.track_list;
+                     info = data.message.body.track_list || []; // Ensure info is an array, even if track_list is missing/null
                  }
             }).catch(error => {
+                 searchPerformed = true; // Mark search as completed even on catch
+                 searchError = true;
                  console.error("Error in form submission search:", error);
-                 info = [{ track: { track_id: 0, track_name: "ERROR searching", artist_name: "", album_coverart_100x100: "" } }];
+                 info = []; // Keep info empty on error
             });
         });
     });
@@ -516,8 +570,17 @@
 <span id="instrumental"></span>
 <span id="explicit"></span>
 
-<i>Not what you're looking for? Add the artist into your search</i><br>
+<i>Add the artist into your search for best results</i><br>
 <p id="error-musixmatch" style="color: #f00; display: none;">Sorry, Musixmatch is currently blocking your requests. Please wait up to 5 minutes - the issue will resolve itself.</p>
+
+{#if searchPerformed}
+    {#if searchError}
+        <p style="margin-left: .5rem; color: red;">Error performing search. Please try again.</p>
+    {:else if info.length === 0}
+        <p style="margin-left: .5rem;">No results found for your search.</p>
+    {/if}
+{/if}
+
 <ul id="searchResults">
     <!-- TODO: make this a carousel of vertical cards LOL -->
     {#each info as thing, i}
@@ -534,12 +597,14 @@
             
         </li>
     {/each}
-    <li class="pagination">
-        <!-- wonderful code here, not a pain to see -->
-        <button class="searchButtons" on:click={() => { if (currentPage > 1 && info.length > 0) { searchSong(songValue, currentPage - 1).then((data) => { info = (data.message.header.status_code !== 200) ? [{ track: { track_id: 0, track_name: "ERROR", artist_name: "", album_coverart_100x100: "" } }] : data.message.body.track_list; }); currentPage -= 1; } }}><svg height="16" width="12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.--><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5 0-45.3l-160 160z"/></svg></button>
-        <span>{currentPage}</span>
-        <button class="searchButtons" on:click={() => { if (info.length > 0) { searchSong(songValue, currentPage + 1).then((data) => { info = (data.message.header.status_code !== 200) ? [{ track: { track_id: 0, track_name: "ERROR", artist_name: "", album_coverart_100x100: "" } }] : data.message.body.track_list; }); currentPage += 1; }}}><svg height="16" width="12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.--><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 0-45.3l160 160z"/></svg></button>
-    </li>
+    {#if info.length > 0} <!-- Only show pagination if there are results -->
+        <li class="pagination">
+            <!-- wonderful code here, not a pain to see -->
+            <button class="searchButtons" on:click={() => { if (currentPage > 1 && info.length > 0) { searchSong(songValue, currentPage - 1).then((data) => { info = (data.message.header.status_code !== 200) ? [{ track: { track_id: 0, track_name: "ERROR", artist_name: "", album_coverart_100x100: "" } }] : data.message.body.track_list; }); currentPage -= 1; } }}><svg height="16" width="12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.--><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5 0-45.3l-160 160z"/></svg></button>
+            <span>{currentPage}</span>
+            <button class="searchButtons" on:click={() => { if (info.length > 0) { searchSong(songValue, currentPage + 1).then((data) => { info = (data.message.header.status_code !== 200) ? [{ track: { track_id: 0, track_name: "ERROR", artist_name: "", album_coverart_100x100: "" } }] : data.message.body.track_list; }); currentPage += 1; }}}><svg height="16" width="12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.--><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 0-45.3l160 160z"/></svg></button>
+        </li>
+    {/if}
 </ul>
 
 <div style="display: flex; align-items: center; justify-content: space-between;">
