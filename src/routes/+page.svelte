@@ -4,7 +4,7 @@
 
     // Change apiPrefix to an array of potential prefixes
     var apiPrefixes = ["/api/v1", "https://vercel.lyrics.binimum.org", "https://cloudflare.lyrics.binimum.org", "https://netlify.lyrics.binimum.org"]; // Example prefixes
-    var token = "";
+    var token = ""; // This might become less relevant if fetchWithRetry always gets a token or uses fallback
     let autoScroll: boolean;
     let isScrolling = false;
     let songValue = "";
@@ -26,80 +26,131 @@
     let currentWordIndex = -1; // Track the currently active word index within a line
     let playbackIntervalId: ReturnType<typeof setInterval> | null = null; // Declare interval ID variable
 
-    // Helper function to fetch with retry logic for different prefixes
-    async function fetchWithRetry(url: string) {
+    type RichSyncWord = { c: string; o: number; };
+    type RichSyncLine = { ts: number; te: number; l: RichSyncWord[]; x?: string }; // Added x for fallback case
+    type SubtitleLine = { time: { total: number }; text: string };
+
+    // Helper function to fetch with retry logic for different prefixes and fallback token
+    async function fetchWithRetry(basePathWithQuery: string) { // e.g., /searchSong?q=...
+        const hardcodedToken = "201219dbdb0f6aaba1c774bd931d0e79a28024e28db027ae72955c"; // The fallback token
+
+        // --- Initial attempts with fetched tokens ---
         for (const prefix of apiPrefixes) {
             try {
                 // 1. Fetch token for this prefix
                 console.log(`Attempting to fetch token using prefix: ${prefix}`);
-                // Assuming 'url' parameter to fetchWithRetry is the base path + query (e.g., /searchSong?q=...)
-                // We need a direct fetch for the token here, not using fetchWithRetry itself.
                 const tokenResponse = await fetch(`${prefix}/getToken`);
                 if (!tokenResponse.ok) {
-                    // Throw an error to be caught by the outer catch, signaling to try the next prefix
                     throw new Error(`Token fetch failed for ${prefix}: ${tokenResponse.status} ${tokenResponse.statusText}`);
                 }
                 const tokenData = await tokenResponse.json();
-                // Check if token fetch was successful based on its body content
                 if (tokenData?.message?.header?.status_code !== 200 || !tokenData?.message?.body?.user_token) {
-                    // Throw an error if token data is invalid or indicates an error (like 401)
                     throw new Error(`Invalid token data or error status code from ${prefix}: ${tokenData?.message?.header?.status_code}`);
                 }
                 const currentToken = tokenData.message.body.user_token;
                 console.log(`Successfully obtained token for prefix ${prefix}`);
 
                 // 2. Construct URL for the actual request using the new token
-                // IMPORTANT: The 'url' variable passed to fetchWithRetry must NOT contain the token parameter anymore.
-                // Example: url should be '/searchSong?q=query&page=1', not '/searchSong?q=query&page=1&token=...'
-                const urlObject = new URL(prefix + url); // 'url' is the basePathWithQuery
-                urlObject.searchParams.set('token', currentToken);
+                const urlObject = new URL(prefix + basePathWithQuery, window.location.origin); // Use origin for base URL resolution
+                urlObject.searchParams.set('token', currentToken); // Add the fetched token
                 const fullUrl = urlObject.toString();
 
                 // 3. Fetch the actual data using the obtained token
                 console.log(`Fetching data from: ${fullUrl}`);
                 const response = await fetch(fullUrl);
                 if (!response.ok) {
-                    // If the data fetch itself fails (e.g., 404, 500), throw to skip this prefix
                     throw new Error(`Data fetch failed for ${fullUrl}: ${response.status} ${response.statusText}`);
                 }
                 const data = await response.json();
 
                 // 4. Check the body status code for the data response
                 if (data?.message?.header?.status_code === 200) {
-                    console.log(`Success with prefix: ${prefix}`);
-                    // Update the global token variable upon successful data fetch? Optional.
-                    // token = currentToken;
-                    return data; // Success! Return data, exiting the function.
+                    console.log(`Success with prefix: ${prefix} (using fetched token)`);
+                    return data; // Success! Return data.
                 } else {
-                    // If body status is not 200 (e.g., 401 indicating token didn't work), throw to skip prefix
                     throw new Error(`API returned error in body for ${fullUrl}: Status code ${data?.message?.header?.status_code}`);
                 }
-                // No explicit 'continue' needed here. Success returns, failure throws to the outer catch.
             } catch (error) {
-                console.error(`Error with prefix ${prefix}:`, error);
-                // Continue to the next prefix in the loop
-                // No need to throw here, as the loop will continue to the next prefix
+                console.error(`Error with prefix ${prefix} (using fetched token):`, error);
+                // Continue to the next prefix
             }
-        } 
-        // If the loop completes without returning, all prefixes failed
-        console.error("All API prefixes failed or returned 401.");
-        throw new Error("Failed to fetch data from API after trying all prefixes.");
+        }
+
+        // --- Fallback attempts with hardcoded token across all prefixes ---
+        console.log("All API prefixes failed with fetched tokens. Attempting fallback with hardcoded token across all prefixes.");
+        for (const fallbackPrefix of apiPrefixes) {
+            try {
+                // Construct URL with hardcoded token
+                const fallbackUrlObject = new URL(fallbackPrefix + basePathWithQuery, window.location.origin);
+                fallbackUrlObject.searchParams.set('token', hardcodedToken); // Use hardcoded token
+                const fallbackFullUrl = fallbackUrlObject.toString();
+
+                console.log(`Fetching data using fallback token from: ${fallbackFullUrl}`);
+                const response = await fetch(fallbackFullUrl);
+                if (!response.ok) {
+                    throw new Error(`Fallback data fetch failed for ${fallbackFullUrl}: ${response.status} ${response.statusText}`);
+                }
+                const data = await response.json();
+
+                if (data?.message?.header?.status_code === 200) {
+                    console.log(`Success with fallback token using prefix: ${fallbackPrefix}`);
+                    return data; // Success with fallback!
+                } else {
+                    throw new Error(`API returned error in body for fallback request ${fallbackFullUrl}: Status code ${data?.message?.header?.status_code}`);
+                }
+            } catch (error) {
+                console.error(`Error during fallback attempt with prefix ${fallbackPrefix} (using hardcoded token):`, error);
+                // Continue to the next fallback prefix
+            }
+        }
+
+        // If the initial loop and the fallback loop complete without returning, all attempts failed
+        console.error("All API prefixes failed with both fetched and hardcoded tokens.");
+        throw new Error("Failed to fetch data from API after trying all prefixes with fetched and fallback tokens.");
     }
 
     async function searchSong(name: string, page: number = 1) {
+        // Construct URL without token
+        const basePathWithQuery = `/searchSong?q=${encodeURIComponent(name)}&page=${page}`;
         // Use the fetchWithRetry helper
-        return await fetchWithRetry(`/searchSong?q=${name}&token=${token}&page=${page}`);
+        return await fetchWithRetry(basePathWithQuery);
     }
 
     async function getLyrics(id: number) {
+        // Construct URL without token
+        const basePathWithQuery = `/getLyrics?id=${id}`;
         // Use the fetchWithRetry helper
-        return await fetchWithRetry(`/getLyrics?id=${id}&token=${token}`);
+        return await fetchWithRetry(basePathWithQuery);
     }
 
-    async function getToken() {
-        return await fetchWithRetry(`/getToken`);
-    }
+    // Removed the standalone getToken function as fetchWithRetry handles token fetching internally for data requests.
 
+    // Helper function to try getting an initial token from any prefix
+    async function tryGetInitialToken() {
+        for (const prefix of apiPrefixes) {
+            try {
+                console.log(`Attempting initial token fetch from: ${prefix}/getToken`);
+                const tokenResponse = await fetch(`${prefix}/getToken`);
+                if (!tokenResponse.ok) {
+                    throw new Error(`Initial token fetch failed for ${prefix}: ${tokenResponse.status} ${tokenResponse.statusText}`);
+                }
+                const tokenData = await tokenResponse.json();
+                if (tokenData?.message?.header?.status_code === 200 && tokenData?.message?.body?.user_token) {
+                    console.log(`Successfully obtained initial token from ${prefix}`);
+                    return tokenData.message.body.user_token; // Return the first valid token found
+                } else {
+                    // Don't throw error here, just log and try next prefix
+                    console.warn(`Invalid initial token data or error status code from ${prefix}: ${tokenData?.message?.header?.status_code}`);
+                }
+            } catch (error) {
+                console.error(`Error fetching initial token from ${prefix}:`, error);
+                // Continue to next prefix
+            }
+        }
+        // If loop finishes, no token obtained
+        console.warn("Could not obtain initial token from any prefix.");
+        return null;
+    }
 
     function parseLyrics(id: number) {
         // getLyrics now uses fetchWithRetry
@@ -128,19 +179,19 @@
                     if (!validStructure) {
                         console.error("Unexpected richsync structure:", subtitles);
                         // Handle unexpected structure by falling back to showing the full line
-                        subtitles = subtitles.map(line => ({
+                        subtitles = subtitles.map((line: any): RichSyncLine => ({
                             ...line,
                             ts: typeof line.ts === 'number' ? line.ts * 1000 : 0,
                             te: typeof line.te === 'number' ? line.te * 1000 : 5000,
                             // Create a fake 'l' array if it doesn't exist
-                            l: Array.isArray(line.l) ? line.l.map(word => ({
+                            l: Array.isArray(line.l) ? line.l.map((word: any): RichSyncWord => ({
                                 ...word,
                                 o: typeof word.o === 'number' ? word.o : 0
                             })) : [{ c: line.x || "Unknown", o: 0 }]
                         }));
                     } else {
                         // Convert ts and te from seconds to milliseconds for consistency
-                        subtitles = subtitles.map(line => ({
+                        subtitles = subtitles.map((line: RichSyncLine): RichSyncLine => ({
                             ...line,
                             ts: line.ts * 1000,
                             te: line.te * 1000
@@ -151,8 +202,8 @@
                     if (subtitles.length > 0) {
                         console.log("First richsync line structure after processing:", subtitles[0]);
                         console.log(`First line has ${subtitles[0].l?.length || 0} words`);
-                        subtitles[0].l?.forEach((word, i) => {
-                            console.log(`  Word ${i}: "${word.c}" at offset ${word.o}s`);
+                        subtitles[0].l?.forEach((word: RichSyncWord, i: number) => {
+                            console.log(`  Word ${i}: \"${word.c}\" at offset ${word.o}s`);
                         });
                     }
                 } catch (e) {
@@ -165,7 +216,7 @@
                 subtitles = JSON.parse(data.message.body.subtitle.subtitle_body);
                 // Keep the existing structure { time: { total: number }, text: string }
                 // Convert time.total (seconds) to milliseconds
-                 subtitles = subtitles.map(line => ({
+                 subtitles = subtitles.map((line: SubtitleLine): SubtitleLine => ({
                     ...line,
                     time: { total: line.time.total * 1000 }
                 }));
@@ -392,48 +443,41 @@
         })
     }
 
-    const parseToken = () => {
-        getToken().then(data => {
-            try {
-                token = data.message.body.user_token;
-                (document.getElementById("submit") as HTMLInputElement)!.disabled = false;
+    const parseToken = async () => { // Make async
+        const fetchedToken = await tryGetInitialToken(); // Use the new helper
+
+        if (fetchedToken) {
+            token = fetchedToken; // Set the global token (may still be useful for display or other logic)
+            (document.getElementById("submit") as HTMLInputElement)!.disabled = false;
+            document.getElementById("error-musixmatch")!.style.display = "none";
+            localStorage.setItem("token", token); // Store the working token
+            console.log("Initial token obtained and stored.");
+        } else {
+            // No token fetched, try localStorage
+            const storedToken = localStorage.getItem("token");
+            if (storedToken) {
+                token = storedToken; // Use stored token
+                console.warn("Musixmatch token fetch failed, but a localStorage alternative is available. Using stored token.");
                 document.getElementById("error-musixmatch")!.style.display = "none";
-                localStorage.setItem("token", token);
-            } catch (_) {
-                // user token not in message
-                if (localStorage.getItem("token") == null) {
-                    console.error("Musixmatch token can not be accessed (blocked by a captcha?) and no localStorage alternative");
-                    document.getElementById("error-musixmatch")!.style.display = "block";
-                    setTimeout(parseToken, 1000); 
-                }
-                else {
-                    token = localStorage.getItem("token") || "";
-                    console.warn("Musixmatch token is blocked, but a localStorage alternative is avaliable.")
-                    document.getElementById("error-musixmatch")!.style.display = "none";
-                    (document.getElementById("submit") as HTMLInputElement)!.disabled = false;
-                    setTimeout(parseToken, 5000); 
-                }
-            }
-        }).catch(_ => {
-            if (localStorage.getItem("token") == null) {
-                console.error("Musixmatch token can not be accessed (blocked by a captcha?) and no localStorage alternative");
+                (document.getElementById("submit") as HTMLInputElement)!.disabled = false;
+                // Optionally schedule another attempt later if the stored token might expire
+                // setTimeout(parseToken, 300000); // e.g., try again in 5 minutes
+            } else {
+                // No token fetched and none in storage - try fallback token for initial load?
+                // For now, stick to original logic: disable search and show error.
+                console.error("Musixmatch token cannot be accessed and no localStorage alternative. Search disabled.");
                 document.getElementById("error-musixmatch")!.style.display = "block";
-                setTimeout(parseToken, 1000); 
+                (document.getElementById("submit") as HTMLInputElement)!.disabled = true; // Keep disabled
+                // Retry fetching token periodically
+                setTimeout(parseToken, 5000); // Retry sooner if completely blocked initially
             }
-            else {
-                token = localStorage.getItem("token") || "";
-                console.warn("Musixmatch token is blocked, but a localStorage alternative is avaliable.")
-                document.getElementById("error-musixmatch")!.style.display = "none";
-                (document.getElementById("submit") as HTMLInputElement)!.disabled = false;
-                setTimeout(parseToken, 5000); 
-            }
-        });
-    }
+        }
+    };
 
     onMount(() => {
         checkForScroll();
         (document.getElementById("submit") as HTMLInputElement)!.disabled = true; // disable the search button
-        parseToken(); // parse for musixmatch token
+        parseToken(); // Call the async function
         document.getElementById("artistForm")?.addEventListener("submit", (e) => {
             e.preventDefault();
             currentPage = 1;
@@ -513,7 +557,17 @@
     {#if subtitles.length > 0}
         {#if lyricsType === 'richsync'}
             {#each subtitles as line, i}
-                <div class="lyric-line" data-index={i} data-ts={line.ts} data-te={line.te} on:click={() => syncPlayback(line.ts)}>
+                <!-- A11y: Added role, tabindex, and keydown handler -->
+                <div 
+                    class="lyric-line" 
+                    data-index={i} 
+                    data-ts={line.ts} 
+                    data-te={line.te} 
+                    on:click={() => syncPlayback(line.ts)} 
+                    on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') syncPlayback(line.ts); }}
+                    role="button" 
+                    tabindex="0"
+                >
                     {#each line.l as word, j}
                         {#if word.c.trim() !== ''} 
                             <!-- Only create a span for non-space words -->
@@ -529,8 +583,16 @@
             {/each}
         {:else if lyricsType === 'subtitle'}
             {#each subtitles as line, i}
-                <!-- Changed from button to div, added on:click -->
-                <div class="lyric-line" data-index={i} data-timestamp={line.time.total} on:click={() => syncPlayback(line.time.total)}>
+                <!-- A11y: Added role, tabindex, and keydown handler -->
+                <div 
+                    class="lyric-line" 
+                    data-index={i} 
+                    data-timestamp={line.time.total} 
+                    on:click={() => syncPlayback(line.time.total)}
+                    on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') syncPlayback(line.time.total); }}
+                    role="button" 
+                    tabindex="0"
+                >
                     {line.text}
                 </div>
             {/each}
@@ -565,16 +627,6 @@
         margin: 0 .5rem;
         overflow: hidden;
         box-sizing: border-box;
-    }
-    #lyrics button {
-        background: transparent;
-        border: 0;
-        cursor: pointer;
-        display: inline;
-        color: black;
-        font-size: 1.5em;
-        text-align: left;
-        margin-left: 0;
     }
     :global(.active) {
         font-weight: bold !important;
@@ -727,6 +779,10 @@
         width: 100%;
         border-radius: 4px;
         transition: background-color 0.2s ease-in-out; /* Smooth transition for active state */
+        &:focus {
+            outline: 2px solid dodgerblue; /* Add focus outline for accessibility */
+            outline-offset: 2px;
+        }
     }
 
     #lyrics div.lyric-line.active {
