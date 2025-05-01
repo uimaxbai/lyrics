@@ -3,7 +3,7 @@
     import Switch from './Switch.svelte';
 
     // Change apiPrefix to an array of potential prefixes
-    var apiPrefixes = ["/api/v1"]; // Example prefixes
+    var apiPrefixes = ["/api/v1", "https://vercel.lyrics.binimum.org", "https://cloudflare.lyrics.binimum.org", "https://netlify.lyrics.binimum.org"]; // Example prefixes
     var token = "";
     let autoScroll: boolean;
     let isScrolling = false;
@@ -30,29 +30,57 @@
     async function fetchWithRetry(url: string) {
         for (const prefix of apiPrefixes) {
             try {
-                const fullUrl = `${prefix}${url}`;
-                console.log(`Trying API prefix: ${prefix} for URL: ${url}`); // Optional: for debugging
+                // 1. Fetch token for this prefix
+                console.log(`Attempting to fetch token using prefix: ${prefix}`);
+                // Assuming 'url' parameter to fetchWithRetry is the base path + query (e.g., /searchSong?q=...)
+                // We need a direct fetch for the token here, not using fetchWithRetry itself.
+                const tokenResponse = await fetch(`${prefix}/getToken`);
+                if (!tokenResponse.ok) {
+                    // Throw an error to be caught by the outer catch, signaling to try the next prefix
+                    throw new Error(`Token fetch failed for ${prefix}: ${tokenResponse.status} ${tokenResponse.statusText}`);
+                }
+                const tokenData = await tokenResponse.json();
+                // Check if token fetch was successful based on its body content
+                if (tokenData?.message?.header?.status_code !== 200 || !tokenData?.message?.body?.user_token) {
+                    // Throw an error if token data is invalid or indicates an error (like 401)
+                    throw new Error(`Invalid token data or error status code from ${prefix}: ${tokenData?.message?.header?.status_code}`);
+                }
+                const currentToken = tokenData.message.body.user_token;
+                console.log(`Successfully obtained token for prefix ${prefix}`);
+
+                // 2. Construct URL for the actual request using the new token
+                // IMPORTANT: The 'url' variable passed to fetchWithRetry must NOT contain the token parameter anymore.
+                // Example: url should be '/searchSong?q=query&page=1', not '/searchSong?q=query&page=1&token=...'
+                const urlObject = new URL(prefix + url); // 'url' is the basePathWithQuery
+                urlObject.searchParams.set('token', currentToken);
+                const fullUrl = urlObject.toString();
+
+                // 3. Fetch the actual data using the obtained token
+                console.log(`Fetching data from: ${fullUrl}`);
                 const response = await fetch(fullUrl);
                 if (!response.ok) {
-                    // Handle non-401 errors immediately if needed
-                    console.error(`Fetch error for ${fullUrl}: ${response.status} ${response.statusText}`);
-                    continue; // Or throw an error depending on desired behavior
+                    // If the data fetch itself fails (e.g., 404, 500), throw to skip this prefix
+                    throw new Error(`Data fetch failed for ${fullUrl}: ${response.status} ${response.statusText}`);
                 }
                 const data = await response.json();
-                // Check the specific condition for success (status code not 401)
-                if (data?.message?.header?.status_code !== 401) {
-                    console.log(`Success with prefix: ${prefix}`); // Optional: for debugging
-                    return data; // Return the successful response data
+
+                // 4. Check the body status code for the data response
+                if (data?.message?.header?.status_code === 200) {
+                    console.log(`Success with prefix: ${prefix}`);
+                    // Update the global token variable upon successful data fetch? Optional.
+                    // token = currentToken;
+                    return data; // Success! Return data, exiting the function.
                 } else {
-                    console.error(`Fetch error for ${fullUrl}: ${response.status} ${response.statusText}`);
-                    continue; // Or throw an error depending on desired behavior
+                    // If body status is not 200 (e.g., 401 indicating token didn't work), throw to skip prefix
+                    throw new Error(`API returned error in body for ${fullUrl}: Status code ${data?.message?.header?.status_code}`);
                 }
-                console.log(`Prefix ${prefix} returned 401 or invalid data structure.`); // Optional: for debugging
+                // No explicit 'continue' needed here. Success returns, failure throws to the outer catch.
             } catch (error) {
-                console.error(`Error fetching from prefix ${prefix}:`, error);
-                // Continue to the next prefix even if fetch itself fails (e.g., network error)
+                console.error(`Error with prefix ${prefix}:`, error);
+                // Continue to the next prefix in the loop
+                // No need to throw here, as the loop will continue to the next prefix
             }
-        }
+        } 
         // If the loop completes without returning, all prefixes failed
         console.error("All API prefixes failed or returned 401.");
         throw new Error("Failed to fetch data from API after trying all prefixes.");

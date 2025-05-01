@@ -15,6 +15,12 @@ export async function GET({ url }) {
             "Origin": 'musixmatch.com',
         }
     });
+    
     var data = await response.json();
+
+    if (data.message.header.status_code === 401) {
+        error(401, "Complete a captcha.")
+        
+    }
     return json(data);
 }

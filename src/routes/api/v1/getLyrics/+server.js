@@ -1,5 +1,25 @@
 import { error, json } from '@sveltejs/kit';
 
+/*
+if (data.message.header.status_code === 401) {
+        var linkToFetchNew = `https://api.allorigins.win/get?url=${encodeURIComponent(linkToFetch)}`;
+        // https://apic-desktop.musixmatch.com/ws/1.1/track.subtitle.get?app_id=web-desktop-app-v1.0&subtitle_format=lrc
+        var data = await response.json();
+        var response = await fetch(linkToFetchNew, {
+            headers: {
+                "Cookie": 'AWSELB=55578B011601B1EF8BC274C33F9043CA947F99DCFF0A80541772015CA2B39C35C0F9E1C932D31725A7310BCAEB0C37431E024E2B45320B7F2C84490C2C97351FDE34690157',
+                "Origin": 'musixmatch.com',
+            }
+        });
+        if (!response.ok) {
+            error(500, "Failed to fetch data from the server.");
+        }
+        if (data.message.header.status_code === 401) {
+            error(401, "Complete a captcha.")
+        }
+    }
+*/
+
 /** @type {import('./$types').RequestHandler} */
 export async function GET({ url }) {
     const name = url.searchParams.get('id') || "";
@@ -46,6 +66,7 @@ export async function GET({ url }) {
             // Fall through to fetch subtitles
         } else {
             // Richsync fetch failed with an unexpected error
+            
             error(response.status, `Musixmatch richsync servers errored out with status ${response.status}`);
         }
 
