@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import { page } from '$app/stores';
     import Switch from './Switch.svelte';
 
     // Change apiPrefix to an array of potential prefixes
@@ -9,6 +10,13 @@
     let isScrolling = false;
     let songValue = "";
     let currentPage = 1;
+
+    // URL parameter detection
+    let hideSearchBar = false;
+    let transparentBackground = false;
+    let directLyrics = false; // Flag to indicate if we're loading lyrics directly from URL params
+    let trackName: string | null = null;
+    let artistName: string | null = null;
 
     let subtitles: any[] = [];
     let lyricsType: 'subtitle' | 'richsync' | null = null;
@@ -169,6 +177,66 @@
         return await fetchWithRetry(basePathWithQuery);
     }
 
+    async function getLyricsByISRC(isrc: string) {
+        // First search for the track using ISRC to get the track ID
+        const basePathWithQuery = `/searchSong?isrc=${encodeURIComponent(isrc)}`;
+        const searchData = await fetchWithRetry(basePathWithQuery);
+        
+        if (!searchData || searchData.message.header.status_code !== 200) {
+            throw new Error("Failed to search for track by ISRC");
+        }
+        
+        // Extract track ID from search results
+        if (!searchData.message.body.track_list || searchData.message.body.track_list.length === 0) {
+            throw new Error("No tracks found for the given ISRC");
+        }
+        
+        const trackId = searchData.message.body.track_list[0].track.track_id;
+        
+        // Now get lyrics using the track ID
+        const lyricsData = await getLyrics(trackId);
+        
+        // Add track info to the lyrics response for display
+        if (lyricsData && searchData.message.body.track_list[0].track) {
+            lyricsData.message.body.track_info = {
+                track_name: searchData.message.body.track_list[0].track.track_name,
+                artist_name: searchData.message.body.track_list[0].track.artist_name
+            };
+        }
+        
+        return lyricsData;
+    }
+
+    async function getLyricsByQuery(query: string) {
+        // First search for the track using query to get the track ID
+        const basePathWithQuery = `/searchSong?q=${encodeURIComponent(query)}`;
+        const searchData = await fetchWithRetry(basePathWithQuery);
+        
+        if (!searchData || searchData.message.header.status_code !== 200) {
+            throw new Error("Failed to search for track by query");
+        }
+        
+        // Extract track ID from search results
+        if (!searchData.message.body.track_list || searchData.message.body.track_list.length === 0) {
+            throw new Error("No tracks found for the given query");
+        }
+        
+        const trackId = searchData.message.body.track_list[0].track.track_id;
+        
+        // Now get lyrics using the track ID
+        const lyricsData = await getLyrics(trackId);
+        
+        // Add track info to the lyrics response for display
+        if (lyricsData && searchData.message.body.track_list[0].track) {
+            lyricsData.message.body.track_info = {
+                track_name: searchData.message.body.track_list[0].track.track_name,
+                artist_name: searchData.message.body.track_list[0].track.artist_name
+            };
+        }
+        
+        return lyricsData;
+    }
+
     // Removed the standalone getToken function as fetchWithRetry handles token fetching internally for data requests.
 
     // Helper function to try getting an initial token from any prefix
@@ -291,6 +359,138 @@
             // Handle errors from fetchWithRetry (e.g., all prefixes failed)
             console.error("Error in parseLyrics:", error);
             subtitles = [{ text: "ERROR fetching lyrics after retries" }];
+            lyricsType = null;
+        });
+    }
+
+    function parseLyricsByISRC(isrc: string) {
+        // Similar to parseLyrics but uses ISRC
+        getLyricsByISRC(isrc).then((data) => {
+            if (!data || data.message.header.status_code !== 200) {
+                subtitles = [{ text: "ERROR fetching lyrics by ISRC" }];
+                lyricsType = null;
+                return;
+            }
+
+            // Extract track info from the response for direct lyrics
+            if (data.message.body.track_info) {
+                trackName = data.message.body.track_info.track_name || null;
+                artistName = data.message.body.track_info.artist_name || null;
+            }
+
+            lyricsType = data.type;
+            console.log(`Lyrics type received (ISRC): ${lyricsType}`);
+
+            if (lyricsType === 'richsync') {
+                try {
+                    subtitles = JSON.parse(data.message.body.richsync.richsync_body);
+                    let validStructure = Array.isArray(subtitles) && subtitles.length > 0 && 
+                                        typeof subtitles[0].ts === 'number' &&
+                                        typeof subtitles[0].te === 'number' &&
+                                        Array.isArray(subtitles[0].l);
+                                        
+                    if (!validStructure) {
+                        subtitles = subtitles.map((line: any): RichSyncLine => ({
+                            ...line,
+                            ts: typeof line.ts === 'number' ? line.ts * 1000 : 0,
+                            te: typeof line.te === 'number' ? line.te * 1000 : 5000,
+                            l: Array.isArray(line.l) ? line.l.map((word: any): RichSyncWord => ({
+                                ...word,
+                                o: typeof word.o === 'number' ? word.o : 0
+                            })) : [{ c: line.x || "Unknown", o: 0 }]
+                        }));
+                    } else {
+                        subtitles = subtitles.map((line: RichSyncLine): RichSyncLine => ({
+                            ...line,
+                            ts: line.ts * 1000,
+                            te: line.te * 1000
+                        }));
+                    }
+                } catch (e) {
+                    console.error("Error parsing richsync data (ISRC):", e);
+                    subtitles = [{ text: "Error parsing richsync data" }];
+                    lyricsType = null;
+                }
+            } else if (lyricsType === 'subtitle') {
+                subtitles = JSON.parse(data.message.body.subtitle.subtitle_body);
+                subtitles = subtitles.map((line: SubtitleLine): SubtitleLine => ({
+                    ...line,
+                    time: { total: line.time.total * 1000 }
+                }));
+            } else {
+                subtitles = [{ text: "Unknown lyrics format" }];
+                lyricsType = null;
+            }
+            resetPlayback();
+        }).catch(error => {
+            console.error("Error in parseLyricsByISRC:", error);
+            subtitles = [{ text: "ERROR fetching lyrics by ISRC after retries" }];
+            lyricsType = null;
+        });
+    }
+
+    function parseLyricsByQuery(query: string) {
+        // Similar to parseLyrics but uses query
+        getLyricsByQuery(query).then((data) => {
+            if (!data || data.message.header.status_code !== 200) {
+                subtitles = [{ text: "ERROR fetching lyrics by query" }];
+                lyricsType = null;
+                return;
+            }
+
+            // Extract track info from the response for direct lyrics
+            if (data.message.body.track_info) {
+                trackName = data.message.body.track_info.track_name || null;
+                artistName = data.message.body.track_info.artist_name || null;
+            }
+
+            lyricsType = data.type;
+            console.log(`Lyrics type received (query): ${lyricsType}`);
+
+            if (lyricsType === 'richsync') {
+                try {
+                    subtitles = JSON.parse(data.message.body.richsync.richsync_body);
+                    let validStructure = Array.isArray(subtitles) && subtitles.length > 0 && 
+                                        typeof subtitles[0].ts === 'number' &&
+                                        typeof subtitles[0].te === 'number' &&
+                                        Array.isArray(subtitles[0].l);
+                                        
+                    if (!validStructure) {
+                        subtitles = subtitles.map((line: any): RichSyncLine => ({
+                            ...line,
+                            ts: typeof line.ts === 'number' ? line.ts * 1000 : 0,
+                            te: typeof line.te === 'number' ? line.te * 1000 : 5000,
+                            l: Array.isArray(line.l) ? line.l.map((word: any): RichSyncWord => ({
+                                ...word,
+                                o: typeof word.o === 'number' ? word.o : 0
+                            })) : [{ c: line.x || "Unknown", o: 0 }]
+                        }));
+                    } else {
+                        subtitles = subtitles.map((line: RichSyncLine): RichSyncLine => ({
+                            ...line,
+                            ts: line.ts * 1000,
+                            te: line.te * 1000
+                        }));
+                    }
+                } catch (e) {
+                    console.error("Error parsing richsync data (query):", e);
+                    subtitles = [{ text: "Error parsing richsync data" }];
+                    lyricsType = null;
+                }
+            } else if (lyricsType === 'subtitle') {
+                subtitles = JSON.parse(data.message.body.subtitle.subtitle_body);
+                subtitles = subtitles.map((line: SubtitleLine): SubtitleLine => ({
+                    ...line,
+                    time: { total: line.time.total * 1000 }
+                }));
+            } else {
+                subtitles = [{ text: "Unknown lyrics format" }];
+                lyricsType = null;
+            }
+            resetPlayback();
+        }).catch(error => {
+            console.error("Error in parseLyricsByQuery:", error);
+            subtitles = [{ text: "ERROR fetching lyrics by query after retries" }];
             lyricsType = null;
         });
     }
@@ -515,9 +715,38 @@
     };
 
     onMount(() => {
+        // Check for URL parameters first
+        const urlParams = new URLSearchParams(window.location.search);
+        const trackId = urlParams.get('id');
+        const isrc = urlParams.get('isrc');
+        const query = urlParams.get('q');
+
+        // If any direct parameter is found, set flags and load lyrics directly
+        if (trackId || isrc || query) {
+            hideSearchBar = true;
+            transparentBackground = true;
+            directLyrics = true;
+            
+            // Apply transparent background class to body
+            document.body.classList.add('transparent-bg');
+            
+            // Load lyrics directly based on parameter type
+            if (trackId) {
+                const id = parseInt(trackId);
+                if (!isNaN(id)) {
+                    parseLyrics(id);
+                }
+            } else if (isrc) {
+                parseLyricsByISRC(isrc);
+            } else if (query) {
+                parseLyricsByQuery(query);
+            }
+        }
+
         checkForScroll();
         (document.getElementById("submit") as HTMLInputElement)!.disabled = true; // disable the search button
         parseToken(); // Call the async function
+        
         document.getElementById("artistForm")?.addEventListener("submit", (e) => {
             e.preventDefault();
             currentPage = 1;
@@ -550,6 +779,7 @@
     <meta name="description" content="Live lyrics for free, powered by Musixmatch! Sync to your songs and more...">
 </svelte:head>
 
+{#if !hideSearchBar}
 <form id="artistForm" method="post">
     <div style="padding: .5em 0;">
         <label for="song"><svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 512 512"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path opacity="1" d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z"/></svg></label>
@@ -566,7 +796,18 @@
 
 <i>Add the artist into your search for best results</i><br>
 <p id="error-musixmatch" style="color: #f00; display: none;">Sorry, Musixmatch is currently blocking your requests. Please wait up to 5 minutes - the issue will resolve itself.</p>
+{/if}
 
+{#if directLyrics && (trackName || artistName)}
+<div class="direct-lyrics-info">
+    <h2 class="track-title">{trackName || 'Unknown Track'}</h2>
+    {#if artistName}
+        <p class="artist-name">{artistName}</p>
+    {/if}
+</div>
+{/if}
+
+{#if !hideSearchBar}
 {#if searchPerformed}
     {#if searchError}
         <p style="margin-left: .5rem; color: red;">Error performing search. Please try again.</p>
@@ -600,6 +841,7 @@
         </li>
     {/if}
 </ul>
+{/if}
 
 <div style="display: flex; align-items: center; justify-content: space-between;">
     <button id="playButton" on:click={() => { 
@@ -658,6 +900,17 @@
         {:else}
             <!-- Handle error or unknown type -->
             <p>{subtitles[0]?.text || "Loading lyrics..."}</p>
+        {/if}
+        
+        <!-- Footer separator and links -->
+        {#if subtitles.length > 0}
+            <div class="lyrics-footer">
+                <hr class="lyrics-separator">
+                <div class="footer-links">
+                    <a href="https://lyrics.binimum.org" target="_blank" rel="noopener noreferrer">lyrics.binimum.org</a>
+                    <div class="source-text">Source: Musixmatch</div>
+                </div>
+            </div>
         {/if}
     {:else}
         <p>Select a song to see lyrics.</p>
@@ -808,16 +1061,101 @@
             color: white;
         }
 
-        #playButton, .searchButtons, #lyrics button {
-            color: white;
+        :global(body.transparent-bg) {
+            background: transparent !important;
         }
+
+        .direct-lyrics-info {
+            background: linear-gradient(135deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.2));
+            border-color: rgba(0, 0, 0, 0.3);
+        }
+
+        .track-title {
+            background: linear-gradient(135deg, #4a9eff, #a865ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .searchButtons {
+            background: rgba(40, 40, 40, 0.8) !important;
+            border-color: rgba(255, 255, 255, 0.2) !important;
+            color: white !important;
+            
+            &:hover {
+                border-color: #4a9eff !important;
+                background: rgba(50, 50, 50, 0.9) !important;
+            }
+        }
+
+        #artistForm {
+            background: rgba(40, 40, 40, 0.9);
+            border-bottom-color: rgba(255, 255, 255, 0.1);
+            
+            label svg {
+                fill: #4a9eff !important;
+                opacity: 0.9;
+            }
+            
+            #song {
+                background: rgba(40, 40, 40, 0.9) !important;
+                color: white;
+                border-color: rgba(0, 0, 0, 0.3);
+                
+                &:focus {
+                    border-color: #4a9eff;
+                    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.2);
+                }
+            }
+        }
+
+        #playButton {
+            color: white;
+            background: linear-gradient(135deg, #4a9eff, #3d7acc);
+            box-shadow: 0 4px 12px rgba(120, 120, 120, 0.25);
+            
+            &:hover {
+                box-shadow: 0 6px 20px rgba(100, 100, 100, 0.3);
+            }
+        }
+
         svg {
-            // color: white !important;
             filter: invert(100%);
         }
-        #song {
-            background: #222!important;
-            color: white;
+        
+        #playButton svg, #artistForm #submit svg {
+            filter: none !important;
+        }
+
+        /* Dark mode shadow effects for lyrics */
+        #lyrics div.lyric-line .lyric-word {
+            text-shadow: 0 1px 3px rgba(255, 255, 255, 0.1) !important; /* Light white shadow for dark mode */
+        }
+
+        #lyrics div.lyric-line:not(.active) .lyric-word {
+            text-shadow: 0 1px 2px rgba(255, 255, 255, 0.05) !important; /* Very light white shadow for inactive words */
+        }
+
+        :global(.lyric-word.active-word) {
+            text-shadow: 0 3px 12px rgba(140, 140, 140, 0.5), 0 2px 6px rgba(160, 160, 160, 0.3), 0 1px 3px rgba(180, 180, 180, 0.2) !important; /* Enhanced lighter gray shadow for active word in dark mode */
+        }
+
+        /* Words around the active word get enhanced glow in dark mode */
+        :global(.lyric-word.active-word) + .lyric-word,
+        .lyric-word:has(+ :global(.lyric-word.active-word)) {
+            text-shadow: 0 2px 6px rgba(150, 150, 150, 0.25), 0 1px 3px rgba(170, 170, 170, 0.15) !important;
+        }
+
+        :global(.lyric-line.active) {
+            text-shadow: 0 2px 8px rgba(130, 130, 130, 0.3), 0 1px 4px rgba(150, 150, 150, 0.2) !important;
+        }
+
+        :global(.lyric-line.passed) {
+            text-shadow: 0 1px 4px rgba(136, 136, 136, 0.4), 0 1px 2px rgba(255, 255, 255, 0.1) !important;
+        }
+
+        :global(.lyric-word.passed-word) {
+            text-shadow: 0 1px 4px rgba(136, 136, 136, 0.4), 0 1px 2px rgba(255, 255, 255, 0.1) !important;
         }
     }
     i {
@@ -854,34 +1192,57 @@
     /* Apple Music-style word opacity animation */
     #lyrics div.lyric-line .lyric-word {
         opacity: 0.5; /* Default opacity for all words */
-        transition: opacity 0.2s ease-out;
+        transition: all 0.3s ease-out;
+        text-shadow: 0 1px 3px rgba(120, 120, 120, 0.3); /* Light gray shadow for all words */
     }
 
     /* Words in non-active lines have lower opacity */
     #lyrics div.lyric-line:not(.active) .lyric-word {
         opacity: 0.4;
+        text-shadow: 0 1px 2px rgba(150, 150, 150, 0.2); /* Very light gray shadow for inactive words */
     }
     
-    /* Active word styling - Apple Music style with full opacity */
+    /* Active word styling - Apple Music style with full opacity and enhanced shadow */
     :global(.lyric-word.active-word) {
         opacity: 1 !important; /* Full opacity for active word */
         font-weight: bold !important;
         color: inherit !important;
-        transition: opacity 0.1s ease-in !important;
+        text-shadow: 0 3px 12px rgba(100, 100, 100, 0.4), 0 2px 6px rgba(120, 120, 120, 0.3), 0 1px 3px rgba(140, 140, 140, 0.2) !important; /* Multi-layered lighter gray shadow for active word */
+        transform: translateY(-1px) !important; /* Slight lift effect */
+        transition: all 0.15s ease-out !important;
     }
 
-    /* Passed line styling - keep bold but make gray */
+    /* Words around the active word get a subtle glow */
+    :global(.lyric-word.active-word) + .lyric-word,
+    .lyric-word:has(+ :global(.lyric-word.active-word)) {
+        text-shadow: 0 2px 6px rgba(130, 130, 130, 0.25), 0 1px 3px rgba(150, 150, 150, 0.15) !important;
+        opacity: 0.8 !important;
+        transition: all 0.3s ease-out !important;
+    }
+
+    /* Active line gets enhanced shadow */
+    :global(.lyric-line.active) {
+        text-shadow: 0 2px 8px rgba(110, 110, 110, 0.3), 0 1px 4px rgba(130, 130, 130, 0.2) !important;
+        transform: translateY(-0.5px) !important;
+        transition: all 0.2s ease-out !important;
+    }
+
+    /* Passed line styling - keep bold but make gray with subtle shadow */
     :global(.lyric-line.passed) {
         color: #888 !important; /* Gray color for passed lines */
         font-weight: bold !important; /* Keep bold */
+        text-shadow: 0 1px 4px rgba(136, 136, 136, 0.3), 0 1px 2px rgba(160, 160, 160, 0.15) !important; /* Lighter gray shadow for passed lines */
+        transform: translateY(0) !important;
     }
 
-    /* Passed word styling - keep bold but make gray */
+    /* Passed word styling - keep bold but make gray with subtle shadow */
     :global(.lyric-word.passed-word) {
         opacity: 1 !important; /* Full opacity for passed words */
         font-weight: bold !important; /* Keep bold */
         color: #888 !important; /* Gray color for passed words */
-        transition: color 0.2s ease-in !important;
+        text-shadow: 0 1px 4px rgba(136, 136, 136, 0.3), 0 1px 2px rgba(160, 160, 160, 0.15) !important; /* Lighter gray shadow for passed words */
+        transform: translateY(0) !important;
+        transition: all 0.2s ease-in !important;
     }
 
     /* Remove old scrolling animation */
@@ -895,5 +1256,240 @@
         width: 100%;
         max-width: 100vw;
         overflow-x: hidden;
+    }
+
+    /* Transparent background mode for direct lyrics loading */
+    :global(body.transparent-bg) {
+        background: transparent !important;
+    }
+
+    /* Direct lyrics info styling */
+    .direct-lyrics-info {
+        text-align: center;
+        margin: 1rem 0 2rem 0;
+        padding: 1rem;
+        border-radius: 12px;
+        background: linear-gradient(135deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1));
+        border: 1px solid rgba(0, 0, 0, 0.2);
+    }
+
+    .track-title {
+        font-size: 2rem;
+        font-weight: 700;
+        margin: 0 0 0.5rem 0;
+        background: linear-gradient(135deg, #0873ff, #8b45ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .artist-name {
+        font-size: 1.2rem;
+        margin: 0;
+        opacity: 0.8;
+        font-weight: 500;
+    }
+
+    /* Improved search results styling */
+    .searchButtons {
+        padding: 1rem;
+        border: 1px solid rgba(0, 0, 0, 0.1);
+        background: rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(10px);
+        border-radius: 12px;
+        color: black;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        
+        &:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(120, 120, 120, 0.15);
+            border-color: #0873ff;
+        }
+        
+        img {
+            border-radius: 8px;
+        }
+        div {
+            text-align: left;
+        }
+    }
+
+    /* Enhanced play button styling */
+    #playButton {
+        padding: 1rem 1.5rem;
+        margin-left: .5rem;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #0873ff, #0066cc);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: .75rem;
+        font-size: 1.1em;
+        color: white;
+        border: none;
+        margin-top: 1rem;
+        font-weight: 600;
+        transition: all 0.2s ease;
+        box-shadow: 0 4px 12px rgba(120, 120, 120, 0.25);
+        
+        &:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        }
+        
+        svg {
+            filter: invert(1) !important;
+        }
+    }
+
+    /* Modern form styling */
+    #artistForm {
+        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        background: rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(10px);
+        border-radius: 16px 16px 0 0;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        
+        div {
+            align-items: center;
+            justify-content: center;
+            display: flex;
+            gap: .5rem;
+        }
+        
+        #submit {
+            width: 100%;
+            border-radius: 12px;
+            padding: 1rem;
+            font-size: 1.1em;
+            border: 0;
+            color: white;
+            background: linear-gradient(135deg, #0873ff, #0066cc);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(120, 120, 120, 0.25);
+            
+            &:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(100, 100, 100, 0.3);
+            }
+            &:disabled {
+                transform: none !important;
+                background: #afafaf !important;
+                box-shadow: none !important;
+                cursor: not-allowed;
+            }
+        }
+        
+        svg {
+            height: 1.25em;
+            margin-left: 1rem;
+            width: 1.25em;
+            opacity: 1;
+            fill: white;
+        }
+        
+        label svg {
+            height: 1.5em;
+            width: 1.5em;
+            opacity: 0.7;
+            fill: #0873ff;
+            transition: all 0.2s ease;
+        }
+        
+        #song {
+            margin: 0;
+            max-width: 100%;
+            overflow: hidden;
+            border-radius: 12px;
+            position: sticky;
+            top: 0;
+            left: 0;
+            border: 2px solid rgba(0, 0, 0, 0.2);
+            font-size: 1.8em;
+            outline: 0;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(15px);
+            margin-left: 5px;
+            padding: 0.75rem 1rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 12px rgba(140, 140, 140, 0.12), 0 1px 3px rgba(0, 0, 0, 0.05);
+            
+            &:focus {
+                border-color: #0873ff;
+                box-shadow: 0 0 0 3px rgba(120, 120, 120, 0.15), 0 4px 20px rgba(130, 130, 130, 0.12);
+                transform: translateY(-1px);
+            }
+            
+            &:hover {
+                border-color: rgba(8, 115, 255, 0.4);
+                box-shadow: 0 3px 15px rgba(110, 110, 110, 0.1), 0 1px 4px rgba(0, 0, 0, 0.08);
+            }
+        }
+        
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Lyrics footer styling */
+    .lyrics-footer {
+        margin-top: 3rem;
+        padding: 1rem 0;
+    }
+
+    .lyrics-separator {
+        border: none;
+        height: 1px;
+        background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.1), transparent);
+        margin: 2rem 0 1.5rem 0;
+    }
+
+    .footer-links {
+        text-align: center;
+        font-size: 0.9rem;
+        color: #666;
+        line-height: 1.6;
+    }
+
+    .footer-links a {
+        color: #0873ff;
+        text-decoration: none;
+        font-weight: 500;
+        transition: color 0.2s ease;
+    }
+
+    .footer-links a:hover {
+        color: #0066cc;
+        text-decoration: underline;
+    }
+
+    .source-text {
+        margin-top: 0.5rem;
+        font-size: 0.85rem;
+        opacity: 0.8;
+    }
+
+    /* Dark mode footer styling */
+    @media (prefers-color-scheme: dark) {
+        .lyrics-separator {
+            background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.15), transparent);
+        }
+
+        .footer-links {
+            color: #aaa;
+        }
+
+        .footer-links a {
+            color: #4a9eff;
+        }
+
+        .footer-links a:hover {
+            color: #66b3ff;
+        }
     }
 </style>
