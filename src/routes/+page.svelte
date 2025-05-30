@@ -304,10 +304,9 @@
             clearInterval(playbackIntervalId);
             playbackIntervalId = null;
         }
-        // Remove existing active classes for lines and words
-        document.querySelectorAll(".active, .active-word").forEach(el => {
-            el.classList.remove("active");
-            el.classList.remove("active-word");
+        // Remove existing active, passed, and word classes for lines and words
+        document.querySelectorAll(".active, .active-word, .passed, .passed-word").forEach(el => {
+            el.classList.remove("active", "active-word", "passed", "passed-word");
         });
     }
 
@@ -327,9 +326,8 @@
         // REMOVED: then = (new Date()).getTime(); // Start time - This was overwriting the sync time
 
         // Ensure highlighting is cleared before starting the interval
-        document.querySelectorAll(".active, .active-word").forEach(el => {
-            el.classList.remove("active");
-            el.classList.remove("active-word");
+        document.querySelectorAll(".active, .active-word, .passed, .passed-word").forEach(el => {
+            el.classList.remove("active", "active-word", "passed", "passed-word");
         });
         currentLyricIndex = -1; // Reset index tracking
         currentWordIndex = -1;
@@ -359,17 +357,24 @@
 
             // --- Handle Line Change ---
             if (newActiveLineIndex !== currentLyricIndex) {
-                // Always remove active class from the previous line if there was one
+                // Mark previous line as passed (instead of removing active)
                 if (currentLyricIndex !== -1) {
                     const oldLineEl = document.querySelector(`#lyrics [data-index="${currentLyricIndex}"]`);
                     oldLineEl?.classList.remove("active");
-                    oldLineEl?.querySelectorAll('.lyric-word').forEach(wordEl => wordEl.classList.remove('active-word'));
+                    oldLineEl?.classList.add("passed");
+                    // Keep word highlighting on passed lines - don't remove active-word class
+                    oldLineEl?.querySelectorAll('.lyric-word').forEach(wordEl => {
+                        if (wordEl.classList.contains('active-word')) {
+                            wordEl.classList.add('passed-word');
+                        }
+                    });
                 }
 
                 // Add active class to the new line
                 if (newActiveLineIndex !== -1) {
                     const newLineEl = document.querySelector(`#lyrics [data-index="${newActiveLineIndex}"]`);
                     newLineEl?.classList.add("active");
+                    newLineEl?.classList.remove("passed"); // Remove passed class if going backwards
                     // Optional: Scroll into view (consider using autoScroll flag)
                     if (autoScroll && !isScrolling) {
                         newLineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -403,26 +408,15 @@
                     if (newActiveWordIndex !== currentWordIndex) {
                         console.log(`  Updating word highlight: Old=${currentWordIndex}, New=${newActiveWordIndex}`); // Enable this log
                         
-                        // Remove active class from previous word
-                        if (currentWordIndex !== -1) {
-                            const oldWordEl = document.querySelector(`.lyric-word[data-line-index="${currentLyricIndex}"][data-word-index="${currentWordIndex}"]`);
-                            if (oldWordEl) {
-                                console.log('Removing highlight from word:', oldWordEl.textContent);
-                                oldWordEl.classList.remove('active-word');
-                            } else {
-                                console.warn(`Could not find previous word element: line ${currentLyricIndex}, word ${currentWordIndex}`);
-                            }
-                        }
-                        
-                        // Add active class to new word
+                        // Add active class to all words from beginning up to and including the new active word
                         if (newActiveWordIndex !== -1) {
-                            const newWordEl = document.querySelector(`.lyric-word[data-line-index="${currentLyricIndex}"][data-word-index="${newActiveWordIndex}"]`);
-                            if (newWordEl) {
-                                console.log('Adding highlight to word:', newWordEl.textContent);
-                                newWordEl.classList.add('active-word');
-                            } else {
-                                console.warn(`Could not find new word element: line ${currentLyricIndex}, word ${newActiveWordIndex}`);
+                            for (let k = 0; k <= newActiveWordIndex; k++) {
+                                const wordEl = document.querySelector(`.lyric-word[data-line-index="${currentLyricIndex}"][data-word-index="${k}"]`);
+                                if (wordEl) {
+                                    wordEl.classList.add('active-word');
+                                }
                             }
+                            console.log(`Highlighted words 0 through ${newActiveWordIndex} in line ${currentLyricIndex}`);
                         }
                         
                         currentWordIndex = newActiveWordIndex;
@@ -618,7 +612,7 @@
 </div>
 
 <div id="lyrics">
-    <p style="font-size: 1rem">To sync to a line, click on it (after playing lyrics). Press 'Play lyrics' to begin the logic</p>
+    <p style="font-size: 1rem">To sync to a line, click on it. Press 'Play lyrics' to begin the logic</p>
     {#if subtitles.length > 0}
         {#if lyricsType === 'richsync'}
             {#each subtitles as line, i}
@@ -874,6 +868,20 @@
         font-weight: bold !important;
         color: inherit !important;
         transition: opacity 0.1s ease-in !important;
+    }
+
+    /* Passed line styling - keep bold but make gray */
+    :global(.lyric-line.passed) {
+        color: #888 !important; /* Gray color for passed lines */
+        font-weight: bold !important; /* Keep bold */
+    }
+
+    /* Passed word styling - keep bold but make gray */
+    :global(.lyric-word.passed-word) {
+        opacity: 1 !important; /* Full opacity for passed words */
+        font-weight: bold !important; /* Keep bold */
+        color: #888 !important; /* Gray color for passed words */
+        transition: color 0.2s ease-in !important;
     }
 
     /* Remove old scrolling animation */
