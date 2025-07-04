@@ -2,6 +2,7 @@
     import { onMount } from 'svelte';
     import { page } from '$app/stores';
     import Switch from './Switch.svelte';
+    import { getSyncedTime } from '../lib/timeSync';
 
     // Change apiPrefix to an array of potential prefixes
     var apiPrefixes = ["/api/v1", "https://vercel.lyrics.binimum.org", "https://cloudflare.lyrics.binimum.org", "https://netlify.lyrics.binimum.org"]; // Example prefixes
@@ -34,7 +35,9 @@
     let then = 0;
     let currentLyricIndex = -1; // Track the currently active lyric index
     let currentWordIndex = -1; // Track the currently active word index within a line
-    let playbackIntervalId: ReturnType<typeof setInterval> | null = null; // Declare interval ID variable
+    let playbackAnimationId: number | null = null; // Use requestAnimationFrame
+
+    let selectedTrack: TrackInfo['track'] | null = null;
 
     type RichSyncWord = { c: string; o: number; };
     type RichSyncLine = { ts: number; te: number; l: RichSyncWord[]; x?: string }; // Added x for fallback case
@@ -48,10 +51,8 @@
         if (apiPrefixes.length > 0) {
             const randomIndex = Math.floor(Math.random() * apiPrefixes.length);
             const randomPrefix = apiPrefixes[randomIndex];
-            console.log(`Attempting initial fetch with randomly chosen prefix: ${randomPrefix}`);
             try {
                 // 1. Fetch token for the random prefix
-                console.log(`Fetching token using random prefix: ${randomPrefix}`);
                 const tokenResponse = await fetch(`${randomPrefix}/getToken`);
                 if (!tokenResponse.ok) {
                     throw new Error(`Token fetch failed for random ${randomPrefix}: ${tokenResponse.status} ${tokenResponse.statusText}`);
@@ -61,7 +62,6 @@
                     throw new Error(`Invalid token data or error status code from random ${randomPrefix}: ${tokenData?.message?.header?.status_code}`);
                 }
                 const currentToken = tokenData.message.body.user_token;
-                console.log(`Successfully obtained token for random prefix ${randomPrefix}`);
 
                 // 2. Construct URL for the actual request using the new token
                 const urlObject = new URL(randomPrefix + basePathWithQuery, window.location.origin);
@@ -69,7 +69,6 @@
                 const fullUrl = urlObject.toString();
 
                 // 3. Fetch the actual data using the obtained token
-                console.log(`Fetching data from (random attempt): ${fullUrl}`);
                 const response = await fetch(fullUrl);
                 if (!response.ok) {
                     throw new Error(`Data fetch failed for random ${fullUrl}: ${response.status} ${response.statusText}`);
@@ -78,7 +77,6 @@
 
                 // 4. Check the body status code for the data response
                 if (data?.message?.header?.status_code === 200) {
-                    console.log(`Success with randomly chosen prefix: ${randomPrefix} (using fetched token)`);
                     return data; // Success! Return data.
                 }
                 // If status code is not 200, treat it as a failure for this random attempt
@@ -91,11 +89,9 @@
         }
 
         // --- Sequential attempts with fetched tokens (if random failed) ---
-        console.log("Random attempt failed or no prefixes. Starting sequential fallback with fetched tokens.");
         for (const prefix of apiPrefixes) {
             try {
                 // ... (rest of the token fetching and data fetching logic as before)
-                console.log(`Attempting to fetch token using prefix: ${prefix}`);
                 const tokenResponse = await fetch(`${prefix}/getToken`);
                 if (!tokenResponse.ok) {
                     throw new Error(`Token fetch failed for ${prefix}: ${tokenResponse.status} ${tokenResponse.statusText}`);
@@ -105,13 +101,11 @@
                     throw new Error(`Invalid token data or error status code from ${prefix}: ${tokenData?.message?.header?.status_code}`);
                 }
                 const currentToken = tokenData.message.body.user_token;
-                console.log(`Successfully obtained token for prefix ${prefix}`);
 
                 const urlObject = new URL(prefix + basePathWithQuery, window.location.origin);
                 urlObject.searchParams.set('token', currentToken);
                 const fullUrl = urlObject.toString();
 
-                console.log(`Fetching data from: ${fullUrl}`);
                 const response = await fetch(fullUrl);
                 if (!response.ok) {
                     throw new Error(`Data fetch failed for ${fullUrl}: ${response.status} ${response.statusText}`);
@@ -119,7 +113,6 @@
                 const data = await response.json();
 
                 if (data?.message?.header?.status_code === 200) {
-                    console.log(`Success with prefix: ${prefix} (using fetched token)`);
                     return data;
                 } else {
                     throw new Error(`API returned error in body for ${fullUrl}: Status code ${data?.message?.header?.status_code}`);
@@ -131,7 +124,6 @@
         }
 
         // --- Fallback attempts with hardcoded token across all prefixes (if sequential fetched tokens failed) ---
-        console.log("Sequential attempts with fetched tokens failed. Attempting fallback with hardcoded token across all prefixes.");
         for (const fallbackPrefix of apiPrefixes) {
             try {
                 // ... (rest of the hardcoded token logic as before)
@@ -139,7 +131,6 @@
                 fallbackUrlObject.searchParams.set('token', hardcodedToken);
                 const fallbackFullUrl = fallbackUrlObject.toString();
 
-                console.log(`Fetching data using fallback token from: ${fallbackFullUrl}`);
                 const response = await fetch(fallbackFullUrl);
                 if (!response.ok) {
                     throw new Error(`Fallback data fetch failed for ${fallbackFullUrl}: ${response.status} ${response.statusText}`);
@@ -147,7 +138,6 @@
                 const data = await response.json();
 
                 if (data?.message?.header?.status_code === 200) {
-                    console.log(`Success with fallback token using prefix: ${fallbackPrefix}`);
                     return data;
                 } else {
                     throw new Error(`API returned error in body for fallback request ${fallbackFullUrl}: Status code ${data?.message?.header?.status_code}`);
@@ -202,6 +192,8 @@
                 track_name: searchData.message.body.track_list[0].track.track_name,
                 artist_name: searchData.message.body.track_list[0].track.artist_name
             };
+             // Add the full track object for the header display
+            lyricsData.message.body.track_list = searchData.message.body.track_list;
         }
         
         return lyricsData;
@@ -232,6 +224,8 @@
                 track_name: searchData.message.body.track_list[0].track.track_name,
                 artist_name: searchData.message.body.track_list[0].track.artist_name
             };
+             // Add the full track object for the header display
+            lyricsData.message.body.track_list = searchData.message.body.track_list;
         }
         
         return lyricsData;
@@ -243,14 +237,12 @@
     async function tryGetInitialToken() {
         for (const prefix of apiPrefixes) {
             try {
-                console.log(`Attempting initial token fetch from: ${prefix}/getToken`);
                 const tokenResponse = await fetch(`${prefix}/getToken`);
                 if (!tokenResponse.ok) {
                     throw new Error(`Initial token fetch failed for ${prefix}: ${tokenResponse.status} ${tokenResponse.statusText}`);
                 }
                 const tokenData = await tokenResponse.json();
                 if (tokenData?.message?.header?.status_code === 200 && tokenData?.message?.body?.user_token) {
-                    console.log(`Successfully obtained initial token from ${prefix}`);
                     return tokenData.message.body.user_token; // Return the first valid token found
                 } else {
                     // Don't throw error here, just log and try next prefix
@@ -266,161 +258,127 @@
         return null;
     }
 
-    function parseLyrics(id: number) {
-        // getLyrics now uses fetchWithRetry
-        getLyrics(id).then((data) => {
+    /**
+     * Helper function to parse the body of a lyrics API response.
+     * @param responseBody The `message.body` of the API response.
+     * @returns True if parsing was successful, false otherwise.
+     */
+    function _parseLyricsResponse(responseBody: any): boolean {
+        if (!responseBody) {
+            subtitles = [{ text: "ERROR: Invalid response body." }];
+            lyricsType = null;
+            return false;
+        }
+
+        // Check for explicit no-lyrics flags
+        if (responseBody.subtitle?.subtitle_body === '[]' && responseBody.richsync?.richsync_body === '[]') {
+            subtitles = [{ text: "No lyrics found for this song." }];
+            lyricsType = null;
+            return true; // Technically a success, just no lyrics
+        }
+
+        const type = responseBody.richsync?.richsync_body !== '[]' ? 'richsync' : 
+                     responseBody.subtitle?.subtitle_body !== '[]' ? 'subtitle' : null;
+
+        lyricsType = type;
+
+        try {
+            if (lyricsType === 'richsync') {
+                let parsed = JSON.parse(responseBody.richsync.richsync_body);
+                let validStructure = Array.isArray(parsed) && parsed.length > 0 &&
+                                     typeof parsed[0].ts === 'number' &&
+                                     typeof parsed[0].te === 'number' &&
+                                     Array.isArray(parsed[0].l);
+
+                if (!validStructure) {
+                    // Fallback for unexpected structure
+                    subtitles = parsed.map((line: any): RichSyncLine => ({
+                        ...line,
+                        ts: (typeof line.ts === 'number' ? line.ts : 0) * 1000,
+                        te: (typeof line.te === 'number' ? line.te : 5000) * 1000,
+                        l: Array.isArray(line.l) ? line.l.map((word: any): RichSyncWord => ({ ...word, o: typeof word.o === 'number' ? word.o : 0 })) : [{ c: line.x || "Unknown", o: 0 }]
+                    }));
+                } else {
+                    subtitles = parsed.map((line: RichSyncLine): RichSyncLine => ({
+                        ...line,
+                        ts: line.ts * 1000,
+                        te: line.te * 1000
+                    }));
+                }
+            } else if (lyricsType === 'subtitle') {
+                let parsed = JSON.parse(responseBody.subtitle.subtitle_body);
+                subtitles = parsed.map((line: SubtitleLine): SubtitleLine => ({
+                    ...line,
+                    time: { total: line.time.total * 1000 }
+                }));
+            } else {
+                subtitles = [{ text: "No synchronized lyrics available for this song." }];
+                return true;
+            }
+            return true;
+        } catch (e) {
+            console.error("Error parsing lyrics data:", e);
+            subtitles = [{ text: "Error parsing lyrics data." }];
+            lyricsType = null;
+            return false;
+        }
+    }
+
+
+    function parseLyrics(track: TrackInfo['track']) {
+        selectedTrack = track;
+        getLyrics(track.track_id).then((data) => {
             if (!data || data.message.header.status_code !== 200) {
                 subtitles = [{ text: "ERROR fetching lyrics" }];
                 lyricsType = null;
                 return;
             }
-
-            lyricsType = data.type; // Store the type
-            console.log(`Lyrics type received: ${lyricsType}`); // Log the type
-
-            if (lyricsType === 'richsync') {
-                try {
-                    // Richsync body is already JSON
-                    subtitles = JSON.parse(data.message.body.richsync.richsync_body);
-                    console.log("Raw richsync data:", subtitles);
-                    
-                    // Verify the expected structure before converting
-                    let validStructure = Array.isArray(subtitles) && subtitles.length > 0 && 
-                                        typeof subtitles[0].ts === 'number' &&
-                                        typeof subtitles[0].te === 'number' &&
-                                        Array.isArray(subtitles[0].l);
-                                        
-                    if (!validStructure) {
-                        console.error("Unexpected richsync structure:", subtitles);
-                        // Handle unexpected structure by falling back to showing the full line
-                        subtitles = subtitles.map((line: any): RichSyncLine => ({
-                            ...line,
-                            ts: typeof line.ts === 'number' ? line.ts * 1000 : 0,
-                            te: typeof line.te === 'number' ? line.te * 1000 : 5000,
-                            // Create a fake 'l' array if it doesn't exist
-                            l: Array.isArray(line.l) ? line.l.map((word: any): RichSyncWord => ({
-                                ...word,
-                                o: typeof word.o === 'number' ? word.o : 0
-                            })) : [{ c: line.x || "Unknown", o: 0 }]
-                        }));
-                    } else {
-                        // Convert ts and te from seconds to milliseconds for consistency
-                        subtitles = subtitles.map((line: RichSyncLine): RichSyncLine => ({
-                            ...line,
-                            ts: line.ts * 1000,
-                            te: line.te * 1000
-                        }));
-                    }
-                    
-                    // Log the first line's structure for richsync
-                    if (subtitles.length > 0) {
-                        console.log("First richsync line structure after processing:", subtitles[0]);
-                        console.log(`First line has ${subtitles[0].l?.length || 0} words`);
-                        subtitles[0].l?.forEach((word: RichSyncWord, i: number) => {
-                            console.log(`  Word ${i}: \"${word.c}\" at offset ${word.o}s`);
-                        });
-                    }
-                } catch (e) {
-                    console.error("Error parsing richsync data:", e);
-                    subtitles = [{ text: "Error parsing richsync data" }];
-                    lyricsType = null;
-                }
-            } else if (lyricsType === 'subtitle') {
-                // Subtitle body needs parsing
-                subtitles = JSON.parse(data.message.body.subtitle.subtitle_body);
-                // Keep the existing structure { time: { total: number }, text: string }
-                // Convert time.total (seconds) to milliseconds
-                 subtitles = subtitles.map((line: SubtitleLine): SubtitleLine => ({
-                    ...line,
-                    time: { total: line.time.total * 1000 }
-                }));
-            } else {
-                subtitles = [{ text: "Unknown lyrics format" }];
-                 lyricsType = null;
-            }
-            // console.log("Parsed Lyrics:", subtitles);
-            // Reset playback state
+            _parseLyricsResponse(data.message.body);
             resetPlayback();
-            
-            // Add a small delay to check if the DOM elements for words are created
-            setTimeout(() => {
-                if (lyricsType === 'richsync') {
-                    const wordElements = document.querySelectorAll('.lyric-word');
-                    console.log(`Found ${wordElements.length} .lyric-word elements in DOM`);
-                    if (wordElements.length === 0) {
-                        console.warn('No word elements found in DOM. Check rendering of richsync lyrics.');
-                    } else {
-                        console.log('Word elements found. Word-by-word highlighting should work.');
-                        // Remove the test highlight code that was adding highlight to first word
-                    }
-                }
-            }, 500);
+
+            // Scroll to lyrics on mobile after selection
+            if (window.innerWidth < 768) {
+                document.querySelector('.lyrics-container')?.scrollIntoView({ behavior: 'smooth' });
+            }
         }).catch(error => {
-            // Handle errors from fetchWithRetry (e.g., all prefixes failed)
             console.error("Error in parseLyrics:", error);
             subtitles = [{ text: "ERROR fetching lyrics after retries" }];
             lyricsType = null;
         });
     }
 
+    function parseLyricsById(id: number) {
+        getLyrics(id).then((data) => {
+            if (!data || data.message.header.status_code !== 200) {
+                subtitles = [{ text: "ERROR fetching lyrics" }];
+                lyricsType = null;
+                return;
+            }
+            // We don't have track info here, so we can't set selectedTrack
+            _parseLyricsResponse(data.message.body);
+            resetPlayback();
+        }).catch(error => {
+            console.error("Error in parseLyricsById:", error);
+            subtitles = [{ text: "ERROR fetching lyrics after retries" }];
+            lyricsType = null;
+        });
+    }
+
     function parseLyricsByISRC(isrc: string) {
-        // Similar to parseLyrics but uses ISRC
         getLyricsByISRC(isrc).then((data) => {
             if (!data || data.message.header.status_code !== 200) {
                 subtitles = [{ text: "ERROR fetching lyrics by ISRC" }];
                 lyricsType = null;
                 return;
             }
-
-            // Extract track info from the response for direct lyrics
             if (data.message.body.track_info) {
                 trackName = data.message.body.track_info.track_name || null;
                 artistName = data.message.body.track_info.artist_name || null;
             }
-
-            lyricsType = data.type;
-            console.log(`Lyrics type received (ISRC): ${lyricsType}`);
-
-            if (lyricsType === 'richsync') {
-                try {
-                    subtitles = JSON.parse(data.message.body.richsync.richsync_body);
-                    let validStructure = Array.isArray(subtitles) && subtitles.length > 0 && 
-                                        typeof subtitles[0].ts === 'number' &&
-                                        typeof subtitles[0].te === 'number' &&
-                                        Array.isArray(subtitles[0].l);
-                                        
-                    if (!validStructure) {
-                        subtitles = subtitles.map((line: any): RichSyncLine => ({
-                            ...line,
-                            ts: typeof line.ts === 'number' ? line.ts * 1000 : 0,
-                            te: typeof line.te === 'number' ? line.te * 1000 : 5000,
-                            l: Array.isArray(line.l) ? line.l.map((word: any): RichSyncWord => ({
-                                ...word,
-                                o: typeof word.o === 'number' ? word.o : 0
-                            })) : [{ c: line.x || "Unknown", o: 0 }]
-                        }));
-                    } else {
-                        subtitles = subtitles.map((line: RichSyncLine): RichSyncLine => ({
-                            ...line,
-                            ts: line.ts * 1000,
-                            te: line.te * 1000
-                        }));
-                    }
-                } catch (e) {
-                    console.error("Error parsing richsync data (ISRC):", e);
-                    subtitles = [{ text: "Error parsing richsync data" }];
-                    lyricsType = null;
-                }
-            } else if (lyricsType === 'subtitle') {
-                subtitles = JSON.parse(data.message.body.subtitle.subtitle_body);
-                subtitles = subtitles.map((line: SubtitleLine): SubtitleLine => ({
-                    ...line,
-                    time: { total: line.time.total * 1000 }
-                }));
-            } else {
-                subtitles = [{ text: "Unknown lyrics format" }];
-                lyricsType = null;
+            if (data.message.body.track_list && data.message.body.track_list.length > 0) {
+                selectedTrack = data.message.body.track_list[0].track;
             }
+            _parseLyricsResponse(data.message.body);
             resetPlayback();
         }).catch(error => {
             console.error("Error in parseLyricsByISRC:", error);
@@ -430,63 +388,20 @@
     }
 
     function parseLyricsByQuery(query: string) {
-        // Similar to parseLyrics but uses query
         getLyricsByQuery(query).then((data) => {
             if (!data || data.message.header.status_code !== 200) {
                 subtitles = [{ text: "ERROR fetching lyrics by query" }];
                 lyricsType = null;
                 return;
             }
-
-            // Extract track info from the response for direct lyrics
             if (data.message.body.track_info) {
                 trackName = data.message.body.track_info.track_name || null;
                 artistName = data.message.body.track_info.artist_name || null;
             }
-
-            lyricsType = data.type;
-            console.log(`Lyrics type received (query): ${lyricsType}`);
-
-            if (lyricsType === 'richsync') {
-                try {
-                    subtitles = JSON.parse(data.message.body.richsync.richsync_body);
-                    let validStructure = Array.isArray(subtitles) && subtitles.length > 0 && 
-                                        typeof subtitles[0].ts === 'number' &&
-                                        typeof subtitles[0].te === 'number' &&
-                                        Array.isArray(subtitles[0].l);
-                                        
-                    if (!validStructure) {
-                        subtitles = subtitles.map((line: any): RichSyncLine => ({
-                            ...line,
-                            ts: typeof line.ts === 'number' ? line.ts * 1000 : 0,
-                            te: typeof line.te === 'number' ? line.te * 1000 : 5000,
-                            l: Array.isArray(line.l) ? line.l.map((word: any): RichSyncWord => ({
-                                ...word,
-                                o: typeof word.o === 'number' ? word.o : 0
-                            })) : [{ c: line.x || "Unknown", o: 0 }]
-                        }));
-                    } else {
-                        subtitles = subtitles.map((line: RichSyncLine): RichSyncLine => ({
-                            ...line,
-                            ts: line.ts * 1000,
-                            te: line.te * 1000
-                        }));
-                    }
-                } catch (e) {
-                    console.error("Error parsing richsync data (query):", e);
-                    subtitles = [{ text: "Error parsing richsync data" }];
-                    lyricsType = null;
-                }
-            } else if (lyricsType === 'subtitle') {
-                subtitles = JSON.parse(data.message.body.subtitle.subtitle_body);
-                subtitles = subtitles.map((line: SubtitleLine): SubtitleLine => ({
-                    ...line,
-                    time: { total: line.time.total * 1000 }
-                }));
-            } else {
-                subtitles = [{ text: "Unknown lyrics format" }];
-                lyricsType = null;
+            if (data.message.body.track_list && data.message.body.track_list.length > 0) {
+                selectedTrack = data.message.body.track_list[0].track;
             }
+            _parseLyricsResponse(data.message.body);
             resetPlayback();
         }).catch(error => {
             console.error("Error in parseLyricsByQuery:", error);
@@ -495,14 +410,49 @@
         });
     }
 
+    function prevPage() {
+        if (currentPage > 1) {
+            const previousPage = currentPage;
+            currentPage -= 1;
+            searchSong(songValue, currentPage).then((data) => {
+                if (data && data.message.header.status_code === 200) {
+                    info = data.message.body.track_list || [];
+                } else {
+                    info = [];
+                    console.error("Failed to fetch previous page.");
+                    currentPage = previousPage; // Revert page number on error
+                }
+            }).catch(() => {
+                currentPage = previousPage; // Revert page number on error
+            });
+        }
+    }
+
+    function nextPage() {
+        if (info.length > 0) { // This condition might need adjustment based on API behavior for last page
+            const previousPage = currentPage;
+            currentPage += 1;
+            searchSong(songValue, currentPage).then((data) => {
+                if (data && data.message.header.status_code === 200 && data.message.body.track_list.length > 0) {
+                    info = data.message.body.track_list || [];
+                } else {
+                    console.error("Failed to fetch next page or no results on page.");
+                    currentPage = previousPage; // Revert page number
+                }
+            }).catch(() => {
+                currentPage = previousPage; // Revert page number on error
+            });
+        }
+    }
+
     function resetPlayback() {
         then = 0;
         currentLyricIndex = -1;
         currentWordIndex = -1; // Reset word index too
-        // Clear existing interval if it's running
-        if (playbackIntervalId) {
-            clearInterval(playbackIntervalId);
-            playbackIntervalId = null;
+        // Clear existing animation frame if it's running
+        if (playbackAnimationId) {
+            cancelAnimationFrame(playbackAnimationId);
+            playbackAnimationId = null;
         }
         // Remove existing active, passed, and word classes for lines and words
         document.querySelectorAll(".active, .active-word, .passed, .passed-word").forEach(el => {
@@ -513,10 +463,10 @@
     function playLyrics() {
         if (!subtitles || subtitles.length === 0 || !lyricsType) return;
 
-        // Clear any existing interval before starting a new one
-        if (playbackIntervalId) {
-            clearInterval(playbackIntervalId);
-            playbackIntervalId = null;
+        // Clear any existing animation frame before starting a new one
+        if (playbackAnimationId) {
+            cancelAnimationFrame(playbackAnimationId);
+            playbackAnimationId = null;
         }
 
         // Don't resetPlayback() here, as it clears 'then'. 
@@ -532,10 +482,9 @@
         currentLyricIndex = -1; // Reset index tracking
         currentWordIndex = -1;
 
-        // Use the globally declared playbackIntervalId
-        playbackIntervalId = setInterval(() => {
+        const animationStep = () => {
             // ... rest of interval logic remains the same ...
-            const now = (new Date()).getTime();
+            const now = getSyncedTime();
             const diff = now - then; // Time elapsed since playback started
 
             let newActiveLineIndex = -1;
@@ -562,11 +511,10 @@
                     const oldLineEl = document.querySelector(`#lyrics [data-index="${currentLyricIndex}"]`);
                     oldLineEl?.classList.remove("active");
                     oldLineEl?.classList.add("passed");
-                    // Keep word highlighting on passed lines - don't remove active-word class
+                    // When a line is finished, ensure all its words are marked as passed.
                     oldLineEl?.querySelectorAll('.lyric-word').forEach(wordEl => {
-                        if (wordEl.classList.contains('active-word')) {
-                            wordEl.classList.add('passed-word');
-                        }
+                        wordEl.classList.add('passed-word');
+                        wordEl.classList.remove('active-word'); // Clean up active state
                     });
                 }
 
@@ -590,23 +538,19 @@
                 // Ensure currentLine and currentLine.l exist before proceeding
                 if (currentLine && currentLine.l) {
                     const timeWithinLine = diff - currentLine.ts;
-                    console.log(`Line ${currentLyricIndex}, Time within line: ${timeWithinLine.toFixed(0)}ms`); // Enable this log
 
                     let newActiveWordIndex = -1;
                     // Find the last word whose offset is less than or equal to the time within the line
                     for (let j = 0; j < currentLine.l.length; j++) {
                         const wordOffsetMs = currentLine.l[j].o * 1000;
-                        console.log(`  Word ${j} ('${currentLine.l[j].c}') offset: ${wordOffsetMs.toFixed(0)}ms`); // Enable this log
                         if (wordOffsetMs <= timeWithinLine) {
                             newActiveWordIndex = j;
                         } else {
                             break; // Words are ordered by offset
                         }
                     }
-                    console.log(`  New active word index: ${newActiveWordIndex}`); // Enable this log
 
                     if (newActiveWordIndex !== currentWordIndex) {
-                        console.log(`  Updating word highlight: Old=${currentWordIndex}, New=${newActiveWordIndex}`); // Enable this log
                         
                         // Add active class to all words from beginning up to and including the new active word
                         if (newActiveWordIndex !== -1) {
@@ -616,7 +560,6 @@
                                     wordEl.classList.add('active-word');
                                 }
                             }
-                            console.log(`Highlighted words 0 through ${newActiveWordIndex} in line ${currentLyricIndex}`);
                         }
                         
                         currentWordIndex = newActiveWordIndex;
@@ -640,35 +583,37 @@
                 }
             }
 
-            if (endOfLyrics && playbackIntervalId) {
-                 clearInterval(playbackIntervalId);
-                 playbackIntervalId = null;
+            if (endOfLyrics) {
+                 if (playbackAnimationId) {
+                    cancelAnimationFrame(playbackAnimationId);
+                    playbackAnimationId = null;
+                 }
                  // Optionally reset highlighting after a short delay
                  // setTimeout(resetPlayback, 1000);
+            } else {
+                playbackAnimationId = requestAnimationFrame(animationStep);
             }
 
-        }, 50); // Check more frequently for smoother word highlighting
+        };
+        
+        playbackAnimationId = requestAnimationFrame(animationStep);
     }
 
     /** Function to sync playback to a specific time */
     function syncPlayback(startTimeMs: number) {
-        console.log(`syncPlayback called with startTimeMs: ${startTimeMs}`);
         if (!subtitles || subtitles.length === 0) return;
 
         // Calculate the new 'then' value to make the current time match the desired startTimeMs
-        const now = new Date().getTime();
-        console.log(`Current time (now): ${now}`); // Log current time
+        const now = getSyncedTime();
         then = now - startTimeMs;
-        console.log(`Calculated playback start time (then): ${then}`); // Log calculated 'then'
 
-        // Always clear any existing interval and restart playback from the new time
-        if (playbackIntervalId) {
-            clearInterval(playbackIntervalId);
-            playbackIntervalId = null;
+        // Always clear any existing animation frame and restart playback from the new time
+        if (playbackAnimationId) {
+            cancelAnimationFrame(playbackAnimationId);
+            playbackAnimationId = null;
         }
         
-        // Call playLyrics to start/restart the interval with the adjusted 'then' value
-        // playLyrics internally calls resetPlayback first, ensuring a clean state.
+        // Call playLyrics to start/restart the animation with the adjusted 'then' value
         playLyrics(); 
     }
 
@@ -691,7 +636,6 @@
             (document.getElementById("submit") as HTMLInputElement)!.disabled = false;
             document.getElementById("error-musixmatch")!.style.display = "none";
             localStorage.setItem("token", token); // Store the working token
-            console.log("Initial token obtained and stored.");
         } else {
             // No token fetched, try localStorage
             const storedToken = localStorage.getItem("token");
@@ -734,7 +678,7 @@
             if (trackId) {
                 const id = parseInt(trackId);
                 if (!isNaN(id)) {
-                    parseLyrics(id);
+                    parseLyricsById(id);
                 }
             } else if (isrc) {
                 parseLyricsByISRC(isrc);
@@ -779,717 +723,582 @@
     <meta name="description" content="Live lyrics for free, powered by Musixmatch! Sync to your songs and more...">
 </svelte:head>
 
-{#if !hideSearchBar}
-<form id="artistForm" method="post">
-    <div style="padding: .5em 0;">
-        <label for="song"><svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 512 512"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path opacity="1" d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z"/></svg></label>
-        <input type="text" bind:value={songValue} autocorrect="off" autocapitalize="off" name="song" required id="song" placeholder="Song, lyrics, artist..." spellcheck="false">
-    </div>
-    <input id="submit" type="submit" value="Search">
-</form>
-
-<br />
-
-<!-- TODO do this -->
-<span id="instrumental"></span>
-<span id="explicit"></span>
-
-<i>Add the artist into your search for best results</i><br>
-<p id="error-musixmatch" style="color: #f00; display: none;">Sorry, Musixmatch is currently blocking your requests. Please wait up to 5 minutes - the issue will resolve itself.</p>
-{/if}
-
-{#if directLyrics && (trackName || artistName)}
-<div class="direct-lyrics-info">
-    <h2 class="track-title">{trackName || 'Unknown Track'}</h2>
-    {#if artistName}
-        <p class="artist-name">{artistName}</p>
-    {/if}
-</div>
-{/if}
-
-{#if !hideSearchBar}
-{#if searchPerformed}
-    {#if searchError}
-        <p style="margin-left: .5rem; color: red;">Error performing search. Please try again.</p>
-    {:else if info.length === 0}
-        <p style="margin-left: .5rem;">No results found for your search.</p>
-    {/if}
-{/if}
-
-<ul id="searchResults">
-    <!-- TODO: make this a carousel of vertical cards LOL -->
-    {#each info as thing, i}
-        <li>
-            <button class="searchButtons" on:click={() => parseLyrics(thing.track.track_id)}>
-                <!-- this replace job is not my finest work. -->
-                <img src={thing.track.album_coverart_100x100.replace("http", "https").replace("httpss", "https")} alt="Cover image of {thing.track.track_name}" width="50" height="50">
-                <div>
-                    <b>{thing.track.track_name}</b>
-                    <br />
-                    <span>{thing.track.artist_name}</span>
-                </div>
-            </button>
-            
-        </li>
-    {/each}
-    {#if info.length > 0} <!-- Only show pagination if there are results -->
-        <li class="pagination">
-            <!-- wonderful code here, not a pain to see -->
-            <button class="searchButtons" on:click={() => { if (currentPage > 1 && info.length > 0) { searchSong(songValue, currentPage - 1).then((data) => { info = (data.message.header.status_code !== 200) ? [{ track: { track_id: 0, track_name: "ERROR", artist_name: "", album_coverart_100x100: "" } }] : data.message.body.track_list; }); currentPage -= 1; } }}><svg height="16" width="12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.--><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5 0-45.3l-160 160z"/></svg></button>
-            <span>{currentPage}</span>
-            <button class="searchButtons" on:click={() => { if (info.length > 0) { searchSong(songValue, currentPage + 1).then((data) => { info = (data.message.header.status_code !== 200) ? [{ track: { track_id: 0, track_name: "ERROR", artist_name: "", album_coverart_100x100: "" } }] : data.message.body.track_list; }); currentPage += 1; }}}><svg height="16" width="12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.--><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 0-45.3l160 160z"/></svg></button>
-        </li>
-    {/if}
-</ul>
-{/if}
-
-<div style="display: flex; align-items: center; justify-content: space-between;">
-    <button id="playButton" on:click={() => { 
-        // Reset playback state and set start time to now before playing
-        resetPlayback(); 
-        then = new Date().getTime(); 
-        playLyrics(); 
-    }}><svg xmlns="http://www.w3.org/2000/svg" height="16" width="12" viewBox="0 0 384 512"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path opacity="1" d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg>    Play lyrics</button>
-    <Switch fontSize={24} bind:value={autoScroll} design="slider" label="Auto-scroll" />
-</div>
-
-<div id="lyrics">
-    <p style="font-size: 1rem">To sync to a line, click on it. Press 'Play lyrics' to begin the logic</p>
-    {#if subtitles.length > 0}
-        {#if lyricsType === 'richsync'}
-            {#each subtitles as line, i}
-                <!-- A11y: Added role, tabindex, and keydown handler -->
-                <div 
-                    class="lyric-line" 
-                    data-index={i} 
-                    data-ts={line.ts} 
-                    data-te={line.te} 
-                    on:click={() => syncPlayback(line.ts)} 
-                    on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') syncPlayback(line.ts); }}
-                    role="button" 
-                    tabindex="0"
-                >
-                    {#each line.l as word, j}
-                        {#if word.c.trim() !== ''} 
-                            <!-- Only create a span for non-space words -->
-                            <span class="lyric-word" data-line-index={i} data-word-index={j} data-offset={word.o * 1000}>
-                                {word.c.trim()}
-                            </span>
-                        {:else}
-                            <!-- Render spaces directly without a span -->
-                            {' '}
-                        {/if}
-                    {/each}
-                </div>
-            {/each}
-        {:else if lyricsType === 'subtitle'}
-            {#each subtitles as line, i}
-                <!-- A11y: Added role, tabindex, and keydown handler -->
-                <div 
-                    class="lyric-line" 
-                    data-index={i} 
-                    data-timestamp={line.time.total} 
-                    on:click={() => syncPlayback(line.time.total)}
-                    on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') syncPlayback(line.time.total); }}
-                    role="button" 
-                    tabindex="0"
-                >
-                    {line.text}
-                </div>
-            {/each}
-        {:else}
-            <!-- Handle error or unknown type -->
-            <p>{subtitles[0]?.text || "Loading lyrics..."}</p>
-        {/if}
-        
-        <!-- Footer separator and links -->
-        {#if subtitles.length > 0}
-            <div class="lyrics-footer">
-                <hr class="lyrics-separator">
-                <div class="footer-links">
-                    <a href="https://lyrics.binimum.org" target="_blank" rel="noopener noreferrer">lyrics.binimum.org</a>
-                    <div class="source-text">Source: Musixmatch</div>
-                </div>
+<div class="main-container">
+    <div class="sidebar">
+        {#if !hideSearchBar}
+        <form id="artistForm" method="post">
+            <div class="search-input-container">
+                <label for="song" class="visually-hidden">Search for a song</label>
+                <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 512 512" aria-hidden="true"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path fill="currentColor" d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z"/></svg>
+                <input type="text" bind:value={songValue} autocorrect="off" autocapitalize="off" name="song" required id="song" placeholder="Song, lyrics, artist..." spellcheck="false">
             </div>
+            <button id="submit" type="submit">Search</button>
+        </form>
+
+        <div class="search-info">
+            <i>Add the artist into your search for best results</i><br>
+            <p id="error-musixmatch" style="color: #f00; display: none;">Sorry, we're having trouble connecting to the lyrics service. This should resolve itself in a few moments.</p>
+        </div>
         {/if}
-    {:else}
-        <p>Select a song to see lyrics.</p>
-    {/if}
+
+        {#if searchPerformed}
+            {#if searchError}
+                <p class="search-status-message error">Error performing search. Please try again.</p>
+            {:else if info.length === 0}
+                <p class="search-status-message">No results found for your search.</p>
+            {/if}
+        {/if}
+
+        <ul id="searchResults">
+            {#each info as thing, i}
+                <li>
+                    <button class="searchButtons" on:click={() => parseLyrics(thing.track)}>
+                        <img src={thing.track.album_coverart_100x100.replace("http", "https").replace("httpss", "https")} alt="Cover image of {thing.track.track_name}" width="50" height="50">
+                        <div class="track-details">
+                            <b>{thing.track.track_name}</b>
+                            <br />
+                            <span>{thing.track.artist_name}</span>
+                        </div>
+                    </button>
+                </li>
+            {/each}
+            {#if info.length > 0} <!-- Only show pagination if there are results -->
+                <li class="pagination">
+                    <button class="pagination-button" on:click={prevPage} disabled={currentPage <= 1} aria-label="Previous page"><svg height="16" width="12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" aria-hidden="true"><!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.--><path fill="currentColor" d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160-160z"/></svg></button>
+                    <span>{currentPage}</span>
+                    <button class="pagination-button" on:click={nextPage} disabled={info.length === 0} aria-label="Next page"><svg height="16" width="12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" aria-hidden="true"><!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.--><path fill="currentColor" d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></button>
+                </li>
+            {/if}
+        </ul>
+    </div>
+
+    <div class="lyrics-container">
+        {#if directLyrics && (trackName || artistName) && !selectedTrack}
+        <div class="direct-lyrics-info">
+            <h2 class="track-title">{trackName || 'Unknown Track'}</h2>
+            {#if artistName}
+                <p class="artist-name">{artistName}</p>
+            {/if}
+        </div>
+        {/if}
+
+        <div class="playback-controls">
+            <button id="playButton" on:click={() => { 
+                // Reset playback state and set start time to now before playing
+                resetPlayback(); 
+                then = getSyncedTime(); 
+                playLyrics(); 
+            }}><svg xmlns="http://www.w3.org/2000/svg" height="16" width="12" viewBox="0 0 384 512" aria-hidden="true"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path fill="currentColor" d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg>    Play lyrics</button>
+            <Switch fontSize={24} bind:value={autoScroll} design="slider" label="Auto-scroll" />
+        </div>
+
+        <div id="lyrics">
+            {#if selectedTrack}
+                <div class="lyrics-header">
+                    <img src={selectedTrack.album_coverart_100x100.replace("http", "https").replace("httpss", "https")} alt="Cover image of {selectedTrack.track_name}" width="80" height="80">
+                    <div>
+                        <h2>{selectedTrack.track_name}</h2>
+                        <p>{selectedTrack.artist_name}</p>
+                    </div>
+                </div>
+            {/if}
+            <p style="font-size: 1rem">To sync to a line, click on it. Press 'Play lyrics' to begin the logic</p>
+            {#if subtitles.length > 0}
+                {#if lyricsType === 'richsync'}
+                    {#each subtitles as line, i}
+                        <!-- A11y: Added role, tabindex, and keydown handler -->
+                        <div 
+                            class="lyric-line" 
+                            data-index={i} 
+                            data-ts={line.ts} 
+                            data-te={line.te} 
+                            on:click={() => syncPlayback(line.ts)} 
+                            on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') syncPlayback(line.ts); }}
+                            role="button" 
+                            tabindex="0"
+                        >
+                            {#each line.l as word, j}
+                                {#if word.c.trim() !== ''} 
+                                    <!-- Only create a span for non-space words -->
+                                    <span class="lyric-word" data-line-index={i} data-word-index={j} data-offset={word.o * 1000}>
+                                        {word.c.trim()}
+                                    </span>
+                                {:else}
+                                    <!-- Render spaces directly without a span -->
+                                    {' '}
+                                {/if}
+                            {/each}
+                        </div>
+                    {/each}
+                {:else if lyricsType === 'subtitle'}
+                    {#each subtitles as line, i}
+                        <!-- A11y: Added role, tabindex, and keydown handler -->
+                        <div 
+                            class="lyric-line" 
+                            data-index={i} 
+                            data-timestamp={line.time.total} 
+                            on:click={() => syncPlayback(line.time.total)}
+                            on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') syncPlayback(line.time.total); }}
+                            role="button" 
+                            tabindex="0"
+                        >
+                            {line.text}
+                        </div>
+                    {/each}
+                {:else}
+                    <!-- Handle error or unknown type -->
+                    <p>{subtitles[0]?.text || "Loading lyrics..."}</p>
+                {/if}
+                
+                <!-- Footer separator and links -->
+                {#if subtitles.length > 0 && lyricsType}
+                    <div class="lyrics-footer">
+                        <hr class="lyrics-separator">
+                        <div class="footer-links">
+                            <a href="https://lyrics.binimum.org" target="_blank" rel="noopener noreferrer">lyrics.binimum.org</a>
+                            <div class="source-text">Source: Musixmatch</div>
+                        </div>
+                    </div>
+                {/if}
+            {:else if searchPerformed}
+                 <p class="no-lyrics-placeholder">Select a song to see lyrics.</p>
+            {:else}
+                <div class="welcome-placeholder">
+                    <h2>Welcome to Live Lyrics</h2>
+                    <p>Search for a song to get started.</p>
+                </div>
+            {/if}
+        </div>
+    </div>
 </div>
 
 <style lang="scss">
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+    :global(body) {
+        margin: 0;
+        font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif!important;
+        background-color: #fff;
+        color: #212121;
+        /* svelte-ignore css-unused-selector */
+        &.transparent-bg {
+            background-color: transparent;
+        }
+    }
     * {
         font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif!important;
+        box-sizing: border-box;
     }
     button {
         cursor: pointer;
     }
-    #searchResults {
-        li, li button {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+
+    .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        border: 0;
+    }
+
+    .main-container {
+        display: flex;
+        flex-direction: column; /* Default to vertical stacking for mobile */
+        height: 100vh;
+        width: 100%;
+    }
+
+    .sidebar {
+        width: 100%;
+        padding: 1rem;
+        border-bottom: 1px solid #eee; /* Use border-bottom for mobile */
         display: flex;
         flex-direction: column;
-        gap: 10px;
-        padding-left: 0;
-        width: calc(100% - 1rem);  /* Account for margin */
-        margin: 0 .5rem;
-        overflow: hidden;
-        box-sizing: border-box;
-    }
-    :global(.active) {
-        font-weight: bold !important;
+        gap: 1rem;
     }
 
-    :global(.lyric-word.active-word) {
-        /* Style for the currently active word - removing background highlight */
-        background-color: transparent !important; /* Remove background color */
-        padding: 0 !important; /* Remove padding */
-        border-radius: 0 !important; /* Remove border radius */
-        font-weight: bold !important;
-        color: inherit !important;
-        opacity: 1 !important; /* Full opacity for active word */
-        transition: opacity 0.2s ease-in !important;
+    .lyrics-container {
+        width: 100%;
+        padding: 1rem;
+        overflow-y: auto;
+        flex-grow: 1; /* Allow lyrics to take remaining space */
     }
-    
-    .searchButtons {
-        padding: .5rem;
+
+    @media (min-width: 768px) {
+        .main-container {
+            flex-direction: row; /* Switch to horizontal for desktop */
+        }
+        .sidebar {
+            width: 350px;
+            min-width: 350px;
+            height: 100vh;
+            border-right: 1px solid #eee; /* Use border-right for desktop */
+            border-bottom: none;
+        }
+        .lyrics-container {
+            flex-grow: 1;
+            height: 100vh;
+        }
+    }
+
+    #artistForm {
+        display: flex; 
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .search-input-container {
+        display: flex;
+        align-items: center;
         border: 1px solid lightgray;
-        background: transparent;
         border-radius: .25rem;
-        color: black;
-        img {
-            border-radius: 5px;
-        }
-        div {
-            text-align: center;
-        }
+        padding-left: 0.5rem;
     }
-    #artistForm {
-        border-bottom: 1px solid lightgray;
-        div {
-            align-items: center;
-            justify-content: center;
-            display: flex;
-            gap: .25rem;
-        }
-        #submit {
-            width: 100%;
-            border-radius: 0;
-            padding: .5rem;
-            font-size: 1.1em;
-            border: 0;
-            color: white;
-            background-color: #0873ff;
-            cursor: pointer;
-            transition: .1s;
-            &:hover {
-                filter: brightness(0.9);
-            }
-            &:disabled {
-                filter: brightness(1)!important;
-                background-color: #afafaf;
-                cursor: not-allowed;
-            }
-        }
-        svg {
-            height: 1.25em;
-            margin-left: 1rem;
-            width: 1.25em;
-        }
-        #song {
-            margin: 0;
-            max-width: 100%;
-            overflow: hidden;
-            border-radius: 0;
-            position: fixed; //  backup
-            position: sticky;
-            top: 0;
-            left: 0;
-            border: 0;
-            // border-bottom: 1px solid lightgray;
-            font-size: 2em;
-            outline: 0;
-            background: white;
-            margin-left: 5px;
-        }
+
+    #song {
+        border: none;
+        outline: none;
+        padding: 0.75rem 0.5rem;
+        font-size: 1em;
         width: 100%;
-        max-width: 100%;
-        box-sizing: border-box;
-    }
-    #searchResults {
-        width: 100%;
-        margin: 0 .5rem;
-        overflow: hidden;
-    }
-    #playButton {
-        padding: .5rem;
-        margin-left: .5rem;
-        // aspect-ratio: 1 / 1;
-        border-radius: 5px;
         background: transparent;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: .5rem;
+    }
+
+    #submit {
+        width: 100%;
+        border-radius: .25rem;
+        padding: .75rem;
         font-size: 1.1em;
-        color: black;
-        border: 1px solid lightgray;
-        margin-top: 1rem;
-    }
-    #lyrics {
-        margin: 0;
-        padding: 0 16px; /* Add horizontal padding to the edges */
-        width: 100%;
-        max-width: 100%;
-        overflow-x: hidden;
-        box-sizing: border-box;
-        button {
-            margin: 0;
-        }
-        
-        /* Larger text size for lyrics */
-        font-size: 1.8em;
-        line-height: 1.5;
-    }
-    @media (prefers-color-scheme: dark) {
-        :global(body) {
-            background-color: #222;
-            color: white;
-        }
-
-        :global(body.transparent-bg) {
-            background: transparent !important;
-        }
-
-        .direct-lyrics-info {
-            background: linear-gradient(135deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.2));
-            border-color: rgba(0, 0, 0, 0.3);
-        }
-
-        .track-title {
-            background: linear-gradient(135deg, #4a9eff, #a865ff);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .searchButtons {
-            background: rgba(40, 40, 40, 0.8) !important;
-            border-color: rgba(255, 255, 255, 0.2) !important;
-            color: white !important;
-            
-            &:hover {
-                border-color: #4a9eff !important;
-                background: rgba(50, 50, 50, 0.9) !important;
-            }
-        }
-
-        #artistForm {
-            background: rgba(40, 40, 40, 0.9);
-            border-bottom-color: rgba(255, 255, 255, 0.1);
-            
-            label svg {
-                fill: #4a9eff !important;
-                opacity: 0.9;
-            }
-            
-            #song {
-                background: rgba(40, 40, 40, 0.9) !important;
-                color: white;
-                border-color: rgba(0, 0, 0, 0.3);
-                
-                &:focus {
-                    border-color: #4a9eff;
-                    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.2);
-                }
-            }
-        }
-
-        #playButton {
-            color: white;
-            background: linear-gradient(135deg, #4a9eff, #3d7acc);
-            box-shadow: 0 4px 12px rgba(120, 120, 120, 0.25);
-            
-            &:hover {
-                box-shadow: 0 6px 20px rgba(100, 100, 100, 0.3);
-            }
-        }
-
-        svg {
-            filter: invert(100%);
-        }
-        
-        #playButton svg, #artistForm #submit svg {
-            filter: none !important;
-        }
-
-        /* Dark mode shadow effects for lyrics */
-        #lyrics div.lyric-line .lyric-word {
-            text-shadow: 0 1px 3px rgba(255, 255, 255, 0.1) !important; /* Light white shadow for dark mode */
-        }
-
-        #lyrics div.lyric-line:not(.active) .lyric-word {
-            text-shadow: 0 1px 2px rgba(255, 255, 255, 0.05) !important; /* Very light white shadow for inactive words */
-        }
-
-        :global(.lyric-word.active-word) {
-            text-shadow: 0 3px 12px rgba(140, 140, 140, 0.5), 0 2px 6px rgba(160, 160, 160, 0.3), 0 1px 3px rgba(180, 180, 180, 0.2) !important; /* Enhanced lighter gray shadow for active word in dark mode */
-        }
-
-        /* Words around the active word get enhanced glow in dark mode */
-        :global(.lyric-word.active-word) + .lyric-word,
-        .lyric-word:has(+ :global(.lyric-word.active-word)) {
-            text-shadow: 0 2px 6px rgba(150, 150, 150, 0.25), 0 1px 3px rgba(170, 170, 170, 0.15) !important;
-        }
-
-        :global(.lyric-line.active) {
-            text-shadow: 0 2px 8px rgba(130, 130, 130, 0.3), 0 1px 4px rgba(150, 150, 150, 0.2) !important;
-        }
-
-        :global(.lyric-line.passed) {
-            text-shadow: 0 1px 4px rgba(136, 136, 136, 0.4), 0 1px 2px rgba(255, 255, 255, 0.1) !important;
-        }
-
-        :global(.lyric-word.passed-word) {
-            text-shadow: 0 1px 4px rgba(136, 136, 136, 0.4), 0 1px 2px rgba(255, 255, 255, 0.1) !important;
-        }
-    }
-    i {
-        margin-left: .5rem;
-        display: block;
-    }
-    #lyrics div.lyric-line {
-        /* Style for individual lyric lines */
-        display: block; /* Ensure each button takes full width */
-        margin: 2px 0; /* Reduced margin for tighter spacing */
-        padding: 2px; /* Reduced padding */
-        text-align: left;
-        background: none;
-        border: none;
-        color: inherit;
-        font: inherit;
-        cursor: pointer;
-        width: 100%;
-        border-radius: 4px;
-        transition: background-color 0.2s ease-in-out; /* Smooth transition for active state */
-        &:focus {
-            outline: 2px solid dodgerblue; /* Add focus outline for accessibility */
-            outline-offset: 2px;
-        }
-    }
-
-    #lyrics div.lyric-line.active {
-        /* Subtle highlight for active line */
-        padding: 4px !important;
-        border-radius: 4px !important;
-        position: relative !important;
-    }
-
-    /* Apple Music-style word opacity animation */
-    #lyrics div.lyric-line .lyric-word {
-        opacity: 0.5; /* Default opacity for all words */
-        transition: all 0.3s ease-out;
-        text-shadow: 0 1px 3px rgba(120, 120, 120, 0.3); /* Light gray shadow for all words */
-    }
-
-    /* Words in non-active lines have lower opacity */
-    #lyrics div.lyric-line:not(.active) .lyric-word {
-        opacity: 0.4;
-        text-shadow: 0 1px 2px rgba(150, 150, 150, 0.2); /* Very light gray shadow for inactive words */
-    }
-    
-    /* Active word styling - Apple Music style with full opacity and enhanced shadow */
-    :global(.lyric-word.active-word) {
-        opacity: 1 !important; /* Full opacity for active word */
-        font-weight: bold !important;
-        color: inherit !important;
-        text-shadow: 0 3px 12px rgba(100, 100, 100, 0.4), 0 2px 6px rgba(120, 120, 120, 0.3), 0 1px 3px rgba(140, 140, 140, 0.2) !important; /* Multi-layered lighter gray shadow for active word */
-        transform: translateY(-1px) !important; /* Slight lift effect */
-        transition: all 0.15s ease-out !important;
-    }
-
-    /* Words around the active word get a subtle glow */
-    :global(.lyric-word.active-word) + .lyric-word,
-    .lyric-word:has(+ :global(.lyric-word.active-word)) {
-        text-shadow: 0 2px 6px rgba(130, 130, 130, 0.25), 0 1px 3px rgba(150, 150, 150, 0.15) !important;
-        opacity: 0.8 !important;
-        transition: all 0.3s ease-out !important;
-    }
-
-    /* Active line gets enhanced shadow */
-    :global(.lyric-line.active) {
-        text-shadow: 0 2px 8px rgba(110, 110, 110, 0.3), 0 1px 4px rgba(130, 130, 130, 0.2) !important;
-        transform: translateY(-0.5px) !important;
-        transition: all 0.2s ease-out !important;
-    }
-
-    /* Passed line styling - keep bold but make gray with subtle shadow */
-    :global(.lyric-line.passed) {
-        color: #888 !important; /* Gray color for passed lines */
-        font-weight: bold !important; /* Keep bold */
-        text-shadow: 0 1px 4px rgba(136, 136, 136, 0.3), 0 1px 2px rgba(160, 160, 160, 0.15) !important; /* Lighter gray shadow for passed lines */
-        transform: translateY(0) !important;
-    }
-
-    /* Passed word styling - keep bold but make gray with subtle shadow */
-    :global(.lyric-word.passed-word) {
-        opacity: 1 !important; /* Full opacity for passed words */
-        font-weight: bold !important; /* Keep bold */
-        color: #888 !important; /* Gray color for passed words */
-        text-shadow: 0 1px 4px rgba(136, 136, 136, 0.3), 0 1px 2px rgba(160, 160, 160, 0.15) !important; /* Lighter gray shadow for passed words */
-        transform: translateY(0) !important;
-        transition: all 0.2s ease-in !important;
-    }
-
-    /* Remove old scrolling animation */
-    /* @keyframes lineGradientScroll { ... } */
-
-    /* Add responsive container styling */
-    :global(body) {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-        width: 100%;
-        max-width: 100vw;
-        overflow-x: hidden;
-    }
-
-    /* Transparent background mode for direct lyrics loading */
-    :global(body.transparent-bg) {
-        background: transparent !important;
-    }
-
-    /* Direct lyrics info styling */
-    .direct-lyrics-info {
-        text-align: center;
-        margin: 1rem 0 2rem 0;
-        padding: 1rem;
-        border-radius: 12px;
-        background: linear-gradient(135deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1));
-        border: 1px solid rgba(0, 0, 0, 0.2);
-    }
-
-    .track-title {
-        font-size: 2rem;
-        font-weight: 700;
-        margin: 0 0 0.5rem 0;
-        background: linear-gradient(135deg, #0873ff, #8b45ff);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }
-
-    .artist-name {
-        font-size: 1.2rem;
-        margin: 0;
-        opacity: 0.8;
-        font-weight: 500;
-    }
-
-    /* Improved search results styling */
-    .searchButtons {
-        padding: 1rem;
-        border: 1px solid rgba(0, 0, 0, 0.1);
-        background: rgba(255, 255, 255, 0.8);
-        backdrop-filter: blur(10px);
-        border-radius: 12px;
-        color: black;
-        transition: all 0.2s ease;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        
-        &:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 16px rgba(120, 120, 120, 0.15);
-            border-color: #0873ff;
-        }
-        
-        img {
-            border-radius: 8px;
-        }
-        div {
-            text-align: left;
-        }
-    }
-
-    /* Enhanced play button styling */
-    #playButton {
-        padding: 1rem 1.5rem;
-        margin-left: .5rem;
-        border-radius: 12px;
-        background: linear-gradient(135deg, #0873ff, #0066cc);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: .75rem;
-        font-size: 1.1em;
+        border: 0;
         color: white;
-        border: none;
-        margin-top: 1rem;
-        font-weight: 600;
-        transition: all 0.2s ease;
-        box-shadow: 0 4px 12px rgba(120, 120, 120, 0.25);
-        
+        background-color: #0873ff;
+        cursor: pointer;
+        transition: .1s;
         &:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+            filter: brightness(0.9);
         }
-        
-        svg {
-            filter: invert(1) !important;
+        &:disabled {
+            filter: brightness(1)!important;
+            background-color: #afafaf;
+            cursor: not-allowed;
         }
     }
 
-    /* Modern form styling */
-    #artistForm {
-        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(10px);
-        border-radius: 16px 16px 0 0;
-        padding: 1rem;
-        margin-bottom: 1rem;
-        
-        div {
-            align-items: center;
-            justify-content: center;
-            display: flex;
-            gap: .5rem;
-        }
-        
-        #submit {
-            width: 100%;
-            border-radius: 12px;
-            padding: 1rem;
-            font-size: 1.1em;
-            border: 0;
-            color: white;
-            background: linear-gradient(135deg, #0873ff, #0066cc);
-            cursor: pointer;
-            transition: all 0.2s ease;
-            font-weight: 600;
-            box-shadow: 0 4px 12px rgba(120, 120, 120, 0.25);
-            
-            &:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 6px 20px rgba(100, 100, 100, 0.3);
-            }
-            &:disabled {
-                transform: none !important;
-                background: #afafaf !important;
-                box-shadow: none !important;
-                cursor: not-allowed;
-            }
-        }
-        
-        svg {
-            height: 1.25em;
-            margin-left: 1rem;
-            width: 1.25em;
-            opacity: 1;
-            fill: white;
-        }
-        
-        label svg {
-            height: 1.5em;
-            width: 1.5em;
-            opacity: 0.7;
-            fill: #0873ff;
-            transition: all 0.2s ease;
-        }
-        
-        #song {
-            margin: 0;
-            max-width: 100%;
-            overflow: hidden;
-            border-radius: 12px;
-            position: sticky;
-            top: 0;
-            left: 0;
-            border: 2px solid rgba(0, 0, 0, 0.2);
-            font-size: 1.8em;
-            outline: 0;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(15px);
-            margin-left: 5px;
-            padding: 0.75rem 1rem;
-            font-weight: 500;
-            transition: all 0.2s ease;
-            box-shadow: 0 2px 12px rgba(140, 140, 140, 0.12), 0 1px 3px rgba(0, 0, 0, 0.05);
-            
-            &:focus {
-                border-color: #0873ff;
-                box-shadow: 0 0 0 3px rgba(120, 120, 120, 0.15), 0 4px 20px rgba(130, 130, 130, 0.12);
-                transform: translateY(-1px);
-            }
-            
-            &:hover {
-                border-color: rgba(8, 115, 255, 0.4);
-                box-shadow: 0 3px 15px rgba(110, 110, 110, 0.1), 0 1px 4px rgba(0, 0, 0, 0.08);
-            }
-        }
-        
-        width: 100%;
-        max-width: 100%;
-        box-sizing: border-box;
-    }
-
-    /* Lyrics footer styling */
-    .lyrics-footer {
-        margin-top: 3rem;
-        padding: 1rem 0;
-    }
-
-    .lyrics-separator {
-        border: none;
-        height: 1px;
-        background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.1), transparent);
-        margin: 2rem 0 1.5rem 0;
-    }
-
-    .footer-links {
-        text-align: center;
+    .search-info {
         font-size: 0.9rem;
         color: #666;
-        line-height: 1.6;
     }
 
-    .footer-links a {
-        color: #0873ff;
-        text-decoration: none;
-        font-weight: 500;
-        transition: color 0.2s ease;
+    .search-status-message {
+        margin-left: .5rem;
+        &.error {
+            color: red;
+        }
     }
 
-    .footer-links a:hover {
-        color: #0066cc;
-        text-decoration: underline;
-    }
+    #searchResults {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        overflow-y: auto;
+        flex-grow: 1;
 
-    .source-text {
-        margin-top: 0.5rem;
-        font-size: 0.85rem;
-        opacity: 0.8;
-    }
+        .searchButtons {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            width: 100%;
+            padding: 0.5rem;
+            border: none;
+            background: none; /* Changed from #f9f9f9 */
+            text-align: left;
+            border-radius: 0.25rem;
+            margin-bottom: 0.5rem;
+            transition: background-color 0.2s;
 
-    /* Dark mode footer styling */
-    @media (prefers-color-scheme: dark) {
-        .lyrics-separator {
-            background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.15), transparent);
+            &:hover {
+                background-color: #f0f0f0;
+            }
+
+            img {
+                border-radius: 0.25rem;
+            }
         }
 
-        .footer-links {
+        .track-details {
+            b {
+                color: #333;
+            }
+            span {
+                color: #666;
+                font-size: 0.9rem;
+            }
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.5rem;
+        }
+
+        .pagination-button {
+            background: none;
+            border: none;
+            padding: 0.5rem;
+            &:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+            svg {
+                color: #333;
+            }
+        }
+    }
+
+    .lyrics-header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding-bottom: 1rem;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid #eee;
+
+        img {
+            border-radius: 0.25rem;
+        }
+
+        h2 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+        p {
+            margin: 0;
+            color: #666;
+        }
+    }
+
+    .playback-controls {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 1rem;
+
+        #playButton {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+            font-size: 1rem;
+            transition: background-color 0.2s;
+
+            &:hover {
+                background-color: #f0f0f0;
+            }
+        }
+    }
+
+    #lyrics {
+        font-size: 1.5rem;
+        line-height: 1.6;
+
+        .lyric-line {
+            padding: 0.5rem;
+            border-radius: 0.25rem;
+            transition: background-color 0.3s, color 0.3s;
+            cursor: pointer;
+
+            &:hover {
+                background-color: #f0f0f0;
+            }
+
+            /* svelte-ignore css-unused-selector */
+            &.active {
+                color: #0873ff;
+                font-weight: bold;
+            }
+
+            /* svelte-ignore css-unused-selector */
+            &.passed {
+                opacity: 0.6;
+            }
+        }
+
+        .lyric-word {
+            transition: color 0.2s;
+            /* svelte-ignore css-unused-selector */
+            &.active-word {
+                color: #0873ff;
+                font-weight: bold;
+            }
+        }
+    }
+
+    .lyrics-footer {
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid #eee;
+        font-size: 0.8rem;
+        color: #666;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+
+        a {
+            color: #0873ff;
+            text-decoration: none;
+            &:hover {
+                text-decoration: underline;
+            }
+        }
+    }
+
+    .no-lyrics-placeholder {
+        color: #999;
+        text-align: center;
+        margin-top: 4rem;
+        font-size: 1.2rem;
+    }
+
+    .welcome-placeholder {
+        color: #999;
+        text-align: center;
+        margin-top: 4rem;
+        h2 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+        p {
+            font-size: 1.1rem;
+        }
+    }
+
+    /* Dark Mode Styles */
+    @media (prefers-color-scheme: dark) {
+        :global(body) {
+            background-color: #121212;
+            color: #e0e0e0;
+        }
+
+        .sidebar {
+            background-color: #1a1a1a;
+            border-bottom-color: #333;
+        }
+
+        @media (min-width: 768px) {
+            .sidebar {
+                border-right-color: #333;
+                border-bottom-color: transparent; /* Remove bottom border on desktop */
+            }
+        }
+
+        .lyrics-container {
+            background-color: #121212;
+        }
+
+        #artistForm .search-input-container {
+            background-color: #2a2a2a;
+            border-color: #444;
+            svg {
+                color: #aaa;
+            }
+        }
+
+        #song {
+            color: #e0e0e0;
+        }
+
+        #submit {
+            background-color: #1e88e5;
+        }
+
+        .search-info {
             color: #aaa;
         }
 
-        .footer-links a {
-            color: #4a9eff;
+        #searchResults .searchButtons {
+            background-color: #2a2a2a;
+            &:hover {
+                background-color: #383838;
+            }
+        }
+        
+        #searchResults .track-details b {
+            color: #e0e0e0;
         }
 
-        .footer-links a:hover {
-            color: #66b3ff;
+        #searchResults .track-details span {
+            color: #aaa;
+        }
+
+        #searchResults .pagination-button svg {
+            color: #e0e0e0;
+        }
+
+        .lyrics-header {
+            border-bottom-color: #333;
+        }
+
+        .lyrics-header h2 {
+            color: #e0e0e0;
+        }
+
+        .lyrics-header p {
+            color: #aaa;
+        }
+
+        .playback-controls #playButton {
+            background-color: #2a2a2a;
+            border-color: #444;
+            color: #e0e0e0;
+            &:hover {
+                background-color: #383838;
+            }
+        }
+
+        #lyrics .lyric-line {
+            &:hover {
+                background-color: #2a2a2a;
+            }
+            /* svelte-ignore css-unused-selector */
+            &.active {
+                color: #1e88e5;
+            }
+            /* svelte-ignore css-unused-selector */
+            &.passed {
+                opacity: 0.5;
+            }
+        }
+
+        /* svelte-ignore css-unused-selector */
+        #lyrics .lyric-word.active-word {
+            color: #1e88e5;
+        }
+
+        .lyrics-footer {
+            border-top-color: #333;
+            color: #aaa;
+            a {
+                color: #1e88e5;
+            }
+        }
+
+        .no-lyrics-placeholder {
+            color: #777;
+        }
+
+        .welcome-placeholder {
+            color: #777;
+        }
+
+        #error-musixmatch {
+            color: #ff5252;
         }
     }
 </style>
