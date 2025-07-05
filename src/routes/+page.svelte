@@ -565,28 +565,49 @@
                     const timeWithinLine = diff - currentLine.ts;
 
                     let newActiveWordIndex = -1;
-                    // Find the last word whose offset is less than or equal to the time within the line
+                    // Find the current word based on timing within the line
                     for (let j = 0; j < currentLine.l.length; j++) {
-                        const wordOffsetMs = currentLine.l[j].o * 1000;
-                        if (wordOffsetMs <= timeWithinLine) {
+                        const word = currentLine.l[j];
+                        const wordStartMs = word.o; // word offset in milliseconds
+                        // Calculate word end time: either the start of the next word, or end of line
+                        const nextWord = currentLine.l[j + 1];
+                        const wordEndMs = nextWord ? nextWord.o : (currentLine.te - currentLine.ts);
+                        
+                        // Check if we're currently within this word's time range
+                        if (timeWithinLine >= wordStartMs && timeWithinLine < wordEndMs) {
                             newActiveWordIndex = j;
-                        } else {
-                            break; // Words are ordered by offset
+                            break;
                         }
                     }
 
+
                     if (newActiveWordIndex !== currentWordIndex) {
-                        const lineWords = document.querySelectorAll(`.lyric-word[data-line-index="${currentLyricIndex}"]`);
+                        // Remove 'passed-word' and 'active-word' from the previous word if it exists
+                        if (currentWordIndex !== -1) {
+                            const prevWordEl = document.querySelector(`.lyric-word[data-line-index="${currentLyricIndex}"][data-word-index="${currentWordIndex}"]`);
+                            prevWordEl?.classList.remove('active-word', 'passed-word');
+                        }
 
                         // Update classes for all words in the current line based on the new index
+                        const lineWords = document.querySelectorAll(`.lyric-word[data-line-index="${currentLyricIndex}"]`);
                         lineWords.forEach((wordEl, k) => {
-                            if (k < newActiveWordIndex) {
+                            const word = currentLine.l[k];
+                            if (!word) return;
+                            
+                            const wordStartMs = word.o;
+                            const nextWord = currentLine.l[k + 1];
+                            const wordEndMs = nextWord ? nextWord.o : (currentLine.te - currentLine.ts);
+                            
+                            if (timeWithinLine >= wordEndMs) {
+                                // Word has been completely sung
                                 wordEl.classList.add('passed-word');
                                 wordEl.classList.remove('active-word');
-                            } else if (k === newActiveWordIndex) {
+                            } else if (k === newActiveWordIndex && timeWithinLine >= wordStartMs) {
+                                // This is the currently active word
                                 wordEl.classList.add('active-word');
                                 wordEl.classList.remove('passed-word');
                             } else {
+                                // Word hasn't been reached yet
                                 wordEl.classList.remove('active-word', 'passed-word');
                             }
                         });
@@ -1273,7 +1294,7 @@
     :global(.active-word) {
         color: var(--text-color);
         font-weight: bold;
-        background-color: rgba(8, 115, 255, 0.15);
+        background-color: rgba(128, 128, 128, 0.2);
     }
 
     :global(.passed-word) {
@@ -1317,7 +1338,7 @@
         :global(.active-word) {
             color: var(--text-color);
             font-weight: bold;
-            background-color: rgba(8, 115, 255, 0.15);
+            background-color: rgba(128, 128, 128, 0.2);
         }
 
         :global(.passed-word) {
