@@ -938,6 +938,24 @@
         }
     }
 
+    .pagination-button {
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--border-color);
+        border-radius: 0.25rem;
+        background-color: #f9f9f9;
+        transition: background-color 0.2s;
+        color: var(--text-color);
+
+        &:hover:not(:disabled) {
+            background-color: #f0f0f0;
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+
     @media (prefers-color-scheme: dark) {
         :global(body) {
             --bg-color: #121212;
@@ -1177,23 +1195,7 @@
         padding: 0.5rem;
     }
 
-    .pagination-button {
-        padding: 0.5rem 0.75rem;
-        border: 1px solid var(--border-color);
-        border-radius: 0.25rem;
-        background-color: #f9f9f9;
-        transition: background-color 0.2s;
-        color: var(--text-color);
-
-        &:hover:not(:disabled) {
-            background-color: #f0f0f0;
-        }
-
-        &:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-    }
+    
 
     .playback-controls {
         display: flex;
