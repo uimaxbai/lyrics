@@ -508,7 +508,7 @@
 
         const animationStep = () => {
             if (!isPlaying) return; // Stop the loop if paused
-
+f
             const now = getSyncedTime();
             const diff = now - then; // Time elapsed since playback started
 
@@ -948,6 +948,8 @@
             --button-text: #fff;
             --secondary-text: #aaa;
             --highlight-bg: #2a2a2a;
+            --button-bg-secondary: #2a2a2a; /* Dark mode secondary button */
+            --highlight-bg-hover: #333; /* Dark mode hover */
         }
 
         #song {
@@ -981,9 +983,24 @@
         .pagination-button {
             background-color: var(--button-bg-secondary);
             color: var(--text-color);
+            border-color: var(--border-color);
             &:hover:not(:disabled) {
                 background-color: var(--highlight-bg-hover);
             }
+        }
+
+        .lyric-line.active {
+            color: var(--secondary-text);
+            font-weight: bold;
+        }
+
+        .lyric-line.passed {
+            color: var(--secondary-text);
+        }
+
+        .active-word,
+        .passed-word {
+            color: var(--text-color);
         }
     }
 
@@ -1230,8 +1247,8 @@
         transition: background-color 0.2s ease-out, color 0.2s ease-out;
 
         &.active {
-            background-color: rgba(8, 115, 255, 0.1);
             font-weight: bold;
+            color: var(--secondary-text);
         }
 
         &.passed {
@@ -1258,7 +1275,7 @@
     }
 
     .passed-word {
-        color: var(--secondary-text);
+        color: var(--text-color);
         font-weight: normal;
         background-color: transparent;
     }
@@ -1274,8 +1291,8 @@
             transition: background-color 0.2s ease-out, color 0.2s ease-out;
 
             &.active {
-                background-color: rgba(8, 115, 255, 0.1);
                 font-weight: bold;
+                color: var(--secondary-text);
             }
 
             &.passed {
@@ -1302,7 +1319,7 @@
         }
 
         .passed-word {
-            color: var(--secondary-text);
+            color: var(--text-color);
             font-weight: normal;
             background-color: transparent;
         }
