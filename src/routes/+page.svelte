@@ -298,13 +298,20 @@
                         ...line,
                         ts: (typeof line.ts === 'number' ? line.ts : 0) * 1000,
                         te: (typeof line.te === 'number' ? line.te : 5000) * 1000,
-                        l: Array.isArray(line.l) ? line.l.map((word: any): RichSyncWord => ({ ...word, o: typeof word.o === 'number' ? word.o : 0 })) : [{ c: line.x || "Unknown", o: 0 }]
+                        l: Array.isArray(line.l) ? line.l.map((word: any): RichSyncWord => ({ 
+                            ...word, 
+                            o: (typeof word.o === 'number' ? word.o : 0) * 1000 // Convert to milliseconds
+                        })) : [{ c: line.x || "Unknown", o: 0 }]
                     }));
                 } else {
                     subtitles = parsed.map((line: RichSyncLine): RichSyncLine => ({
                         ...line,
                         ts: line.ts * 1000,
-                        te: line.te * 1000
+                        te: line.te * 1000,
+                        l: line.l.map((word: RichSyncWord): RichSyncWord => ({
+                            ...word,
+                            o: word.o * 1000 // Convert word offset from seconds to milliseconds
+                        }))
                     }));
                 }
             } else if (lyricsType === 'subtitle') {
@@ -880,7 +887,7 @@
                             {#each line.l as word, j}
                                 {#if word.c.trim() !== ''} 
                                     <!-- Only create a span for non-space words -->
-                                    <span class="lyric-word" data-line-index={i} data-word-index={j} data-offset={word.o * 1000}>
+                                    <span class="lyric-word" data-line-index={i} data-word-index={j} data-offset={word.o}>
                                         {word.c.trim()}
                                     </span>
                                 {:else}
@@ -1015,7 +1022,7 @@
             border-bottom-color: var(--border-color);
         }
 
-        .lyric-line.active {
+        :global(.lyric-line.active) {
             background-color: rgba(30, 136, 229, 0.2);
         }
 
@@ -1028,17 +1035,17 @@
             }
         }
 
-        .lyric-line.active {
+        :global(.lyric-line.active) {
             color: var(--secondary-text);
             font-weight: bold;
         }
 
-        .lyric-line.passed {
+        :global(.lyric-line.passed) {
             color: var(--secondary-text);
         }
 
-        .active-word,
-        .passed-word {
+        :global(.active-word),
+        :global(.passed-word) {
             color: var(--text-color);
         }
     }
@@ -1483,11 +1490,12 @@
         }
 
         #lyrics :global(.lyric-word.active-word) {
-            color: #1e88e5;
+            color: var(--text-color);
+            background-color: rgba(128, 128, 128, 0.2);
         }
 
         #lyrics :global(.lyric-word.passed-word) {
-            color: #1e88e5;
+            color: var(--text-color);
             opacity: 1;
         }
 
