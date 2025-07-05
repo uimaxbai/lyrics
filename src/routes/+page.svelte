@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import { page } from '$app/stores';
     import Switch from './Switch.svelte';
-    import { getSyncedTime } from '../lib/timeSync';
+    import { getSyncedTime, ensureTimeSynced } from '../lib/timeSync';
 
     // Change apiPrefix to an array of potential prefixes
     var apiPrefixes = ["/api/v1", "https://vercel.lyrics.binimum.org", "https://cloudflare.lyrics.binimum.org", "https://netlify.lyrics.binimum.org"]; // Example prefixes
@@ -36,6 +36,8 @@
     let currentLyricIndex = -1; // Track the currently active lyric index
     let currentWordIndex = -1; // Track the currently active word index within a line
     let playbackAnimationId: number | null = null; // Use requestAnimationFrame
+    let isPlaying = false; // Add isPlaying state
+    let isSyncing = false; // Add isSyncing state for time sync
 
     let selectedTrack: TrackInfo['track'] | null = null;
 
@@ -446,6 +448,7 @@
     }
 
     function resetPlayback() {
+        isPlaying = false; // Stop playback
         then = 0;
         currentLyricIndex = -1;
         currentWordIndex = -1; // Reset word index too
@@ -460,8 +463,30 @@
         });
     }
 
-    function playLyrics() {
+    function pauseLyrics() {
+        isPlaying = false;
+        if (playbackAnimationId) {
+            cancelAnimationFrame(playbackAnimationId);
+            playbackAnimationId = null;
+        }
+    }
+
+    async function playLyrics() {
         if (!subtitles || subtitles.length === 0 || !lyricsType) return;
+
+        // Ensure time is synced before starting playback. Show syncing indicator.
+        isSyncing = true;
+        try {
+            await ensureTimeSynced();
+        } catch (error) {
+            console.error("Time sync failed, playback may be inaccurate.", error);
+            // Proceeding with local time as a fallback.
+        } finally {
+            isSyncing = false;
+        }
+
+        // Set playing state
+        isPlaying = true;
 
         // Clear any existing animation frame before starting a new one
         if (playbackAnimationId) {
@@ -469,21 +494,21 @@
             playbackAnimationId = null;
         }
 
-        // Don't resetPlayback() here, as it clears 'then'. 
-        // Resetting should happen *before* setting the desired 'then'.
-        // resetPlayback(); 
+        // If 'then' is not set (i.e., starting from the beginning), set it.
+        if (then === 0) {
+            then = getSyncedTime();
+        }
 
-        // REMOVED: then = (new Date()).getTime(); // Start time - This was overwriting the sync time
-
-        // Ensure highlighting is cleared before starting the interval
-        document.querySelectorAll(".active, .active-word, .passed, .passed-word").forEach(el => {
-            el.classList.remove("active", "active-word", "passed", "passed-word");
-        });
-        currentLyricIndex = -1; // Reset index tracking
-        currentWordIndex = -1;
+        // Ensure highlighting is cleared before starting
+        if (currentLyricIndex === -1) {
+            document.querySelectorAll(".active, .active-word, .passed, .passed-word").forEach(el => {
+                el.classList.remove("active", "active-word", "passed", "passed-word");
+            });
+        }
 
         const animationStep = () => {
-            // ... rest of interval logic remains the same ...
+            if (!isPlaying) return; // Stop the loop if paused
+
             const now = getSyncedTime();
             const diff = now - then; // Time elapsed since playback started
 
@@ -551,16 +576,20 @@
                     }
 
                     if (newActiveWordIndex !== currentWordIndex) {
-                        
-                        // Add active class to all words from beginning up to and including the new active word
-                        if (newActiveWordIndex !== -1) {
-                            for (let k = 0; k <= newActiveWordIndex; k++) {
-                                const wordEl = document.querySelector(`.lyric-word[data-line-index="${currentLyricIndex}"][data-word-index="${k}"]`);
-                                if (wordEl) {
-                                    wordEl.classList.add('active-word');
-                                }
+                        const lineWords = document.querySelectorAll(`.lyric-word[data-line-index="${currentLyricIndex}"]`);
+
+                        // Update classes for all words in the current line based on the new index
+                        lineWords.forEach((wordEl, k) => {
+                            if (k < newActiveWordIndex) {
+                                wordEl.classList.add('passed-word');
+                                wordEl.classList.remove('active-word');
+                            } else if (k === newActiveWordIndex) {
+                                wordEl.classList.add('active-word');
+                                wordEl.classList.remove('passed-word');
+                            } else {
+                                wordEl.classList.remove('active-word', 'passed-word');
                             }
-                        }
+                        });
                         
                         currentWordIndex = newActiveWordIndex;
                     }
@@ -600,7 +629,7 @@
     }
 
     /** Function to sync playback to a specific time */
-    function syncPlayback(startTimeMs: number) {
+    async function syncPlayback(startTimeMs: number) {
         if (!subtitles || subtitles.length === 0) return;
 
         // Calculate the new 'then' value to make the current time match the desired startTimeMs
@@ -610,11 +639,10 @@
         // Always clear any existing animation frame and restart playback from the new time
         if (playbackAnimationId) {
             cancelAnimationFrame(playbackAnimationId);
-            playbackAnimationId = null;
         }
         
         // Call playLyrics to start/restart the animation with the adjusted 'then' value
-        playLyrics(); 
+        await playLyrics(); 
     }
 
     const checkForScroll = () => {
@@ -784,11 +812,22 @@
 
         <div class="playback-controls">
             <button id="playButton" on:click={() => { 
-                // Reset playback state and set start time to now before playing
-                resetPlayback(); 
-                then = getSyncedTime(); 
-                playLyrics(); 
-            }}><svg xmlns="http://www.w3.org/2000/svg" height="16" width="12" viewBox="0 0 384 512" aria-hidden="true"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path fill="currentColor" d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg>    Play lyrics</button>
+                if (isPlaying) {
+                    pauseLyrics();
+                } else {
+                    playLyrics(); 
+                }
+            }} disabled={isSyncing}>
+                {#if isSyncing}
+                    Syncing...
+                {:else if isPlaying}
+                    <svg xmlns="http://www.w3.org/2000/svg" height="16" width="12" viewBox="0 0 320 512" aria-hidden="true"><path fill="currentColor" d="M48 64C21.5 64 0 85.5 0 112V400c0 26.5 21.5 48 48 48H80c26.5 0 48-21.5 48-48V112c0-26.5-21.5-48-48-48H48zm192 0c-26.5 0-48 21.5-48 48V400c0 26.5 21.5 48 48 48h32c26.5 0 48-21.5 48-48V112c0-26.5-21.5-48-48-48H240z"/></svg>
+                    Pause lyrics
+                {:else}
+                    <svg xmlns="http://www.w3.org/2000/svg" height="16" width="12" viewBox="0 0 384 512" aria-hidden="true"><!--!Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2023 Fonticons, Inc.--><path fill="currentColor" d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg>
+                    Play lyrics
+                {/if}
+            </button>
             <Switch fontSize={24} bind:value={autoScroll} design="slider" label="Auto-scroll" />
         </div>
 
@@ -877,13 +916,75 @@
     :global(body) {
         margin: 0;
         font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif!important;
-        background-color: #fff;
-        color: #212121;
+        
+        /* Light Mode Variables */
+        --bg-color: #fff;
+        --text-color: #212121;
+        --border-color: #eee;
+        --sidebar-bg: #fff;
+        --button-bg: #0873ff;
+        --button-text: #fff;
+        --secondary-text: #555;
+        --highlight-bg: #f0f0f0;
+
+        background-color: var(--bg-color);
+        color: var(--text-color);
+
         /* svelte-ignore css-unused-selector */
         &.transparent-bg {
             background-color: transparent;
         }
     }
+
+    @media (prefers-color-scheme: dark) {
+        :global(body) {
+            --bg-color: #121212;
+            --text-color: #e0e0e0;
+            --border-color: #333;
+            --sidebar-bg: #1a1a1a;
+            --button-bg: #1e88e5;
+            --button-text: #fff;
+            --secondary-text: #aaa;
+            --highlight-bg: #2a2a2a;
+        }
+
+        #song {
+            color: var(--text-color);
+        }
+
+        .search-input-container {
+            border-color: #444;
+            background-color: #2a2a2a;
+        }
+
+        #submit {
+            background-color: var(--button-bg);
+            color: var(--button-text);
+        }
+
+        .searchButtons {
+            &:hover {
+                background-color: #333;
+            }
+        }
+
+        .lyrics-header {
+            border-bottom-color: var(--border-color);
+        }
+
+        .lyric-line.active {
+            background-color: rgba(30, 136, 229, 0.2);
+        }
+
+        .pagination-button {
+            background-color: #2a2a2a;
+            color: var(--text-color);
+            &:hover:not(:disabled) {
+                background-color: #333;
+            }
+        }
+    }
+
     * {
         font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif!important;
         box-sizing: border-box;
@@ -913,10 +1014,11 @@
     .sidebar {
         width: 100%;
         padding: 1rem;
-        border-bottom: 1px solid #eee; /* Use border-bottom for mobile */
+        border-bottom: 1px solid var(--border-color); /* Use variable */
         display: flex;
         flex-direction: column;
         gap: 1rem;
+        background-color: var(--sidebar-bg);
     }
 
     .lyrics-container {
@@ -934,7 +1036,7 @@
             width: 350px;
             min-width: 350px;
             height: 100vh;
-            border-right: 1px solid #eee; /* Use border-right for desktop */
+            border-right: 1px solid var(--border-color); /* Use variable */
             border-bottom: none;
         }
         .lyrics-container {
@@ -952,9 +1054,11 @@
     .search-input-container {
         display: flex;
         align-items: center;
-        border: 1px solid lightgray;
+        border: 1px solid var(--border-color);
         border-radius: .25rem;
         padding-left: 0.5rem;
+        background-color: #fff; /* Explicit light mode bg */
+        transition: background-color 0.2s, border-color 0.2s;
     }
 
     #song {
@@ -964,6 +1068,7 @@
         font-size: 1em;
         width: 100%;
         background: transparent;
+        color: var(--text-color);
     }
 
     #submit {
@@ -972,8 +1077,8 @@
         padding: .75rem;
         font-size: 1.1em;
         border: 0;
-        color: white;
-        background-color: #0873ff;
+        color: var(--button-text);
+        background-color: var(--button-bg);
         cursor: pointer;
         transition: .1s;
         &:hover {
@@ -989,6 +1094,10 @@
     .search-info {
         font-size: 0.9rem;
         color: #666;
+    }
+
+    .search-info i {
+        color: var(--secondary-text);
     }
 
     .search-status-message {
@@ -1012,14 +1121,14 @@
             width: 100%;
             padding: 0.5rem;
             border: none;
-            background: none; /* Changed from #f9f9f9 */
+            background: transparent;
             text-align: left;
             border-radius: 0.25rem;
-            margin-bottom: 0.5rem;
             transition: background-color 0.2s;
+            color: var(--text-color);
 
             &:hover {
-                background-color: #f0f0f0;
+                background-color: var(--highlight-bg);
             }
 
             img {
@@ -1046,15 +1155,15 @@
         }
 
         .pagination-button {
-            background: none;
-            border: none;
-            padding: 0.5rem;
-            &:disabled {
-                opacity: 0.5;
-                cursor: not-allowed;
-            }
-            svg {
-                color: #333;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.25rem;
+            background-color: #f9f9f9;
+            transition: background-color 0.2s;
+            color: var(--text-color);
+
+            &:hover:not(:disabled) {
+                background-color: #f0f0f0;
             }
         }
     }
@@ -1063,9 +1172,9 @@
         display: flex;
         align-items: center;
         gap: 1rem;
+        margin-bottom: 1.5rem;
         padding-bottom: 1rem;
-        margin-bottom: 1rem;
-        border-bottom: 1px solid #eee;
+        border-bottom: 1px solid var(--border-color);
 
         img {
             border-radius: 0.25rem;
@@ -1077,7 +1186,7 @@
         }
         p {
             margin: 0;
-            color: #666;
+            color: var(--secondary-text);
         }
     }
 
@@ -1111,11 +1220,15 @@
         .lyric-line {
             padding: 0.5rem;
             border-radius: 0.25rem;
-            transition: background-color 0.3s, color 0.3s;
-            cursor: pointer;
+            transition: background-color 0.2s ease-out;
 
-            &:hover {
-                background-color: #f0f0f0;
+            &.active {
+                background-color: rgba(8, 115, 255, 0.1);
+                font-weight: bold;
+            }
+
+            &:not(.active):hover {
+                background-color: var(--highlight-bg);
             }
 
             /* svelte-ignore css-unused-selector */
@@ -1136,6 +1249,12 @@
             &.active-word {
                 color: #0873ff;
                 font-weight: bold;
+            }
+            /* svelte-ignore css-unused-selector */
+            &.passed-word {
+                color: #0873ff;
+                font-weight: bold;
+                opacity: 0.7;
             }
         }
     }
@@ -1279,6 +1398,12 @@
         /* svelte-ignore css-unused-selector */
         #lyrics .lyric-word.active-word {
             color: #1e88e5;
+        }
+
+        /* svelte-ignore css-unused-selector */
+        #lyrics .lyric-word.passed-word {
+            color: #1e88e5;
+            opacity: 0.7;
         }
 
         .lyrics-footer {
