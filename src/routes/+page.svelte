@@ -892,7 +892,7 @@
                 <!-- Footer separator and links -->
                 {#if subtitles.length > 0 && lyricsType}
                     <div class="lyrics-footer">
-                        <hr class="lyrics-separator">
+                        <!-- <hr class="lyrics-separator"> -->
                         <div class="footer-links">
                             <a href="https://lyrics.binimum.org" target="_blank" rel="noopener noreferrer">lyrics.binimum.org</a>
                             <div class="source-text">Source: Musixmatch</div>
@@ -1246,12 +1246,12 @@
         border-radius: 0.25rem;
         transition: background-color 0.2s ease-out, color 0.2s ease-out;
 
-        &.active {
+        &:global(.active) {
             font-weight: bold;
             color: var(--secondary-text);
         }
 
-        &.passed {
+        &:global(.passed) {
             color: var(--secondary-text);
             font-weight: normal;
         }
@@ -1268,13 +1268,13 @@
         border-radius: 0.25rem;
     }
 
-    .active-word {
+    :global(.active-word) {
         color: var(--text-color);
         font-weight: bold;
         background-color: rgba(8, 115, 255, 0.15);
     }
 
-    .passed-word {
+    :global(.passed-word) {
         color: var(--text-color);
         font-weight: normal;
         background-color: transparent;
@@ -1290,12 +1290,12 @@
             border-radius: 0.25rem;
             transition: background-color 0.2s ease-out, color 0.2s ease-out;
 
-            &.active {
+            &:global(.active) {
                 font-weight: bold;
                 color: var(--secondary-text);
             }
 
-            &.passed {
+            &:global(.passed) {
                 color: var(--secondary-text);
                 font-weight: normal;
             }
@@ -1312,13 +1312,13 @@
             border-radius: 0.25rem;
         }
 
-        .active-word {
+        :global(.active-word) {
             color: var(--text-color);
             font-weight: bold;
             background-color: rgba(8, 115, 255, 0.15);
         }
 
-        .passed-word {
+        :global(.passed-word) {
             color: var(--text-color);
             font-weight: normal;
             background-color: transparent;
@@ -1451,23 +1451,19 @@
             &:hover {
                 background-color: #2a2a2a;
             }
-            /* svelte-ignore css-unused-selector */
-            &.active {
+            &:global(.active) {
                 color: #1e88e5;
             }
-            /* svelte-ignore css-unused-selector */
-            &.passed {
+            &:global(.passed) {
                 opacity: 0.5;
             }
         }
 
-        /* svelte-ignore css-unused-selector */
-        #lyrics .lyric-word.active-word {
+        #lyrics :global(.lyric-word.active-word) {
             color: #1e88e5;
         }
 
-        /* svelte-ignore css-unused-selector */
-        #lyrics .lyric-word.passed-word {
+        #lyrics :global(.lyric-word.passed-word) {
             color: #1e88e5;
             opacity: 1;
         }
