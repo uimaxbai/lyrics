@@ -587,40 +587,31 @@
                         }
                     }
 
-
-                    if (newActiveWordIndex !== currentWordIndex) {
-                        // Remove 'passed-word' and 'active-word' from the previous word if it exists
-                        if (currentWordIndex !== -1) {
-                            const prevWordEl = document.querySelector(`.lyric-word[data-line-index="${currentLyricIndex}"][data-word-index="${currentWordIndex}"]`);
-                            prevWordEl?.classList.remove('active-word', 'passed-word');
-                        }
-
-                        // Update classes for all words in the current line based on the new index
-                        const lineWords = document.querySelectorAll(`.lyric-word[data-line-index="${currentLyricIndex}"]`);
-                        lineWords.forEach((wordEl, k) => {
-                            const word = currentLine.l[k];
-                            if (!word) return;
-                            
-                            const wordStartMs = word.o;
-                            const nextWord = currentLine.l[k + 1];
-                            const wordEndMs = nextWord ? nextWord.o : (currentLine.te - currentLine.ts);
-                            
-                            if (timeWithinLine >= wordEndMs) {
-                                // Word has been completely sung
-                                wordEl.classList.add('passed-word');
-                                wordEl.classList.remove('active-word');
-                            } else if (k === newActiveWordIndex && timeWithinLine >= wordStartMs) {
+                    // Update word highlighting for all words in the current line
+                    const lineWords = document.querySelectorAll(`.lyric-word[data-line-index="${currentLyricIndex}"]`);
+                    lineWords.forEach((wordEl, k) => {
+                        const word = currentLine.l[k];
+                        if (!word) return;
+                        
+                        const wordStartMs = word.o;
+                        
+                        // Remove all word classes first
+                        wordEl.classList.remove('active-word', 'passed-word');
+                        
+                        if (timeWithinLine >= wordStartMs) {
+                            if (k === newActiveWordIndex) {
                                 // This is the currently active word
                                 wordEl.classList.add('active-word');
-                                wordEl.classList.remove('passed-word');
-                            } else {
-                                // Word hasn't been reached yet
-                                wordEl.classList.remove('active-word', 'passed-word');
+                            } else if (k < newActiveWordIndex) {
+                                // Word has been completely sung
+                                wordEl.classList.add('passed-word');
                             }
-                        });
-                        
-                        currentWordIndex = newActiveWordIndex;
-                    }
+                            // If k > newActiveWordIndex, word is future - no class added
+                        }
+                        // If timeWithinLine < wordStartMs, word is future - no class added
+                    });
+                    
+                    currentWordIndex = newActiveWordIndex;
                 } else {
                     console.warn('Current line is missing the expected structure:', currentLine);
                 }
@@ -1270,46 +1261,6 @@
         }
     }
 
-    .lyric-line {
-        padding: 0.5rem;
-        cursor: pointer;
-        border-radius: 0.25rem;
-        transition: background-color 0.2s ease-out, color 0.2s ease-out;
-
-        &:global(.active) {
-            font-weight: bold;
-            color: var(--secondary-text);
-        }
-
-        &:global(.passed) {
-            color: var(--secondary-text);
-            font-weight: normal;
-        }
-
-        &:not(.active):hover {
-            background-color: var(--highlight-bg);
-        }
-    }
-
-    .lyric-word {
-        transition: color 0.2s ease-out, background-color 0.2s ease-out;
-        padding: 2px;
-        margin: -2px;
-        border-radius: 0.25rem;
-    }
-
-    :global(.active-word) {
-        color: var(--text-color);
-        font-weight: bold;
-        background-color: rgba(128, 128, 128, 0.2);
-    }
-
-    :global(.passed-word) {
-        color: var(--text-color);
-        font-weight: normal;
-        background-color: transparent;
-    }
-
     #lyrics {
         font-size: 1.5rem;
         line-height: 1.6;
@@ -1482,10 +1433,12 @@
                 background-color: #2a2a2a;
             }
             &:global(.active) {
-                color: #1e88e5;
+                color: #aaa;
+                font-weight: bold;
             }
             &:global(.passed) {
-                opacity: 0.5;
+                color: #666;
+                opacity: 1;
             }
         }
 
